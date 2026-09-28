@@ -29,6 +29,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private float targetZoom = 1.0f;
     private BroadcastReceiver wifiReceiver;
     private String cameraError = "";
+    private final Object frameLock = new Object();
+    private byte[] latestNv21;
+    private int latestFrameWidth;
+    private int latestFrameHeight;
+    private volatile boolean encoderRunning;
+    private Thread encoderThread;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -322,19 +328,27 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             return;
         }
 
-        camera.setPreviewCallback(new Camera.PreviewCallback() {
+        // JPEG 编码放到独立线程，避免阻塞 Camera 回调导致预览卡顿。
+        final Camera.Size encodeSize = camera.getParameters().getPreviewSize();
+        startEncoder(encodeSize.width, encodeSize.height);
+        camera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
             @Override public void onPreviewFrame(byte[] data, Camera c) {
-                if (server == null || data == null) return;
-                try {
-                    Camera.Size s = c.getParameters().getPreviewSize();
-                    android.graphics.YuvImage yuv = new android.graphics.YuvImage(
-                            data, ImageFormat.NV21, s.width, s.height, null);
-                    java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-                    yuv.compressToJpeg(new android.graphics.Rect(0, 0, s.width, s.height), 75, baos);
-                    server.updateFrame(baos.toByteArray());
-                } catch (Exception ignored) {}
+                if (data == null) return;
+                synchronized (frameLock) {
+                    latestNv21 = data.clone();
+                    latestFrameWidth = encodeSize.width;
+                    latestFrameHeight = encodeSize.height;
+                    frameLock.notifyAll();
+                }
+                try { c.addCallbackBuffer(data); } catch (Exception ignored) {}
             }
         });
+        int bufferSize = encodeSize.width * encodeSize.height * 3 / 2;
+        try {
+            camera.addCallbackBuffer(new byte[bufferSize]);
+            camera.addCallbackBuffer(new byte[bufferSize]);
+            camera.addCallbackBuffer(new byte[bufferSize]);
+        } catch (Exception ignored) {}
 
         try {
             camera.startPreview();
@@ -358,6 +372,54 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         }
     }
 
+    private void startEncoder(final int width, final int height) {
+        stopEncoder();
+        encoderRunning = true;
+        synchronized (frameLock) {
+            latestNv21 = null;
+            latestFrameWidth = width;
+            latestFrameHeight = height;
+        }
+        encoderThread = new Thread(new Runnable() {
+            @Override public void run() {
+                while (encoderRunning) {
+                    byte[] data;
+                    int w;
+                    int h;
+                    synchronized (frameLock) {
+                        while (encoderRunning && latestNv21 == null) {
+                            try { frameLock.wait(200); } catch (InterruptedException ignored) {}
+                        }
+                        if (!encoderRunning) return;
+                        data = latestNv21;
+                        w = latestFrameWidth;
+                        h = latestFrameHeight;
+                        latestNv21 = null;
+                    }
+                    try {
+                        android.graphics.YuvImage yuv = new android.graphics.YuvImage(data, ImageFormat.NV21, w, h, null);
+                        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                        yuv.compressToJpeg(new android.graphics.Rect(0, 0, w, h), 70, baos);
+                        if (server != null) server.updateFrame(baos.toByteArray());
+                    } catch (Exception ignored) {}
+                }
+            }
+        }, "jpeg-encoder");
+        encoderThread.setDaemon(true);
+        encoderThread.start();
+    }
+
+    private void stopEncoder() {
+        encoderRunning = false;
+        synchronized (frameLock) {
+            latestNv21 = null;
+            frameLock.notifyAll();
+        }
+        if (encoderThread != null) {
+            try { encoderThread.interrupt(); } catch (Exception ignored) {}
+            encoderThread = null;
+        }
+    }
     private String jsonEscape(String s) {
         return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r");
     }
@@ -449,6 +511,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     private void releaseCamera() {
+        stopEncoder();
         if (camera != null) {
             try { camera.setPreviewCallback(null); } catch (Exception ignored) {}
             try { camera.stopPreview(); } catch (Exception ignored) {}
