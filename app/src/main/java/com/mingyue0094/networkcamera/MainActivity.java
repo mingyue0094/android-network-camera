@@ -38,6 +38,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         holder = surfaceView.getHolder();
         holder.addCallback(this);
         server = new MjpegServer();
+        server.setConfigHandler(new MjpegServer.ConfigHandler() {
+            @Override public String getStatusJson() { return getWebStatusJson(); }
+            @Override public String applyConfig(String resolution, int fps, float zoom) {
+                return applyWebConfig(resolution, fps, zoom);
+            }
+        });
         try { server.start(); status.setText("网络摄像头启动中..."); }
         catch (IOException e) { status.setText("HTTP 8080 启动失败: " + e.getMessage()); }
         registerWifiReceiver();
@@ -111,6 +117,56 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             }
         });
         return root;
+    }
+
+    private String getWebStatusJson() {
+        Camera.Parameters p = camera == null ? null : camera.getParameters();
+        String resolution = "unknown";
+        if (p != null) {
+            Camera.Size s = p.getPreviewSize();
+            if (s != null) resolution = s.width + "x" + s.height;
+        }
+        int fps = targetFps;
+        if (p != null) {
+            try { int[] r = new int[2]; p.getPreviewFpsRange(r); fps = (r[1] + 500) / 1000; } catch (Exception ignored) {}
+        }
+        float zoom = targetZoom;
+        if (p != null) {
+            try {
+                if (p.isZoomSupported()) {
+                    List<Integer> ratios = p.getZoomRatios();
+                    int i = p.getZoom();
+                    if (ratios != null && i >= 0 && i < ratios.size()) zoom = ratios.get(i) / 100.0f;
+                }
+            } catch (Exception ignored) {}
+        }
+        return "{\"ok\":true,\"resolution\":\"" + resolution + "\",\"fps\":" + fps + ",\"zoom\":" + zoom + "}";
+    }
+
+    private String applyWebConfig(String resolution, int fps, float zoom) {
+        try {
+            String[] parts = resolution.split("x");
+            if (parts.length != 2) throw new IllegalArgumentException();
+            int w = Integer.parseInt(parts[0]);
+            int h = Integer.parseInt(parts[1]);
+            if (fps < 1 || fps > 60 || zoom < 1f || zoom > 20f) throw new IllegalArgumentException();
+            prefs.edit().putInt("resolution", resolutionIndex(w, h))
+                    .putInt("fps", fps).putFloat("zoom", zoom).apply();
+            targetFps = fps;
+            targetZoom = zoom;
+            if (camera != null) restartCamera(w, h, fps, zoom);
+            return getWebStatusJson();
+        } catch (Exception e) {
+            return "{\"ok\":false,\"error\":\"invalid parameters\"}";
+        }
+    }
+
+    private int resolutionIndex(int w, int h) {
+        if (w == 640 && h == 480) return 0;
+        if (w == 800 && h == 600) return 1;
+        if (w == 1280 && h == 720) return 2;
+        if (w == 1280 && h == 960) return 3;
+        return 4;
     }
 
     private int savedFpsIndex(int fps) {
