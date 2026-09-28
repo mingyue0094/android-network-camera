@@ -189,7 +189,6 @@ public final class H264Encoder {
     }
 
     private MediaCodecInfo findEncoder(){
-        MediaCodecInfo fallback=null;
         for(int i=0;i<MediaCodecList.getCodecCount();i++){
             MediaCodecInfo x=MediaCodecList.getCodecInfoAt(i);
             if(!x.isEncoder())continue;
@@ -198,9 +197,8 @@ public final class H264Encoder {
             if(!avc)continue;
             String n=x.getName();
             if(!n.startsWith("OMX.google.") && !n.startsWith("c2.android."))return x;
-            if(fallback==null)fallback=x;
         }
-        return fallback;
+        return null;
     }
 
     public String getCodecName(){return codecName;}
