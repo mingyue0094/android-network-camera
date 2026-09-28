@@ -249,7 +249,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
     private String getFpsText(Camera.Parameters p) {
         try {
-            int[] r = p.getPreviewFpsRange();
+            int[] r = new int[2];
+            p.getPreviewFpsRange(r);
             return ((r[1] + 500) / 1000) + " FPS";
         } catch (Exception e) { return targetFps + " FPS"; }
     }
@@ -263,6 +264,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             if (score < bestScore) { best = s; bestScore = score; }
         }
         return best;
+    }
+
+    @Override public void surfaceChanged(SurfaceHolder h, int format, int width, int height) {
+        // Preview configuration is handled when the surface is created.
     }
 
     @Override public void surfaceDestroyed(SurfaceHolder h) { releaseCamera(); }
