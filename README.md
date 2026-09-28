@@ -46,3 +46,31 @@ http://192.168.1.100:8080/
 - Java 8
 
 GitHub Actions 会在 push 或手动运行 workflow 时构建 APK。
+
+## 电脑端 YOLO：直接接收 H.264
+
+手机使用 MediaCodec 硬件 H.264，通过 ws://手机IP:8080/video 输出 fragmented MP4。浏览器使用 MSE 播放；电脑端 YOLO 直接通过 FFmpeg 解码，不再经过 MJPEG/JPEG。
+
+安装：
+
+    pip install websocket-client opencv-python numpy ultralytics
+
+电脑需要 FFmpeg，并确保 ffmpeg.exe 在 PATH。
+
+直接预览：
+
+    python yolo_h264.py --url ws://192.168.1.100:8080/video --width 1280 --height 720
+
+直接 YOLO：
+
+    python yolo_h264.py --url ws://192.168.1.100:8080/video --width 1280 --height 720 --model yolov8n.pt
+
+开启网页密码：
+
+    python yolo_h264.py --url ws://192.168.1.100:8080/video --user admin --password 你的密码 --width 1280 --height 720 --model yolov8n.pt
+
+数据路径：
+
+    Android Camera -> MediaCodec（手机硬件 H.264） -> fMP4 -> WebSocket :8080/video -> 电脑 FFmpeg -> BGR24 -> YOLO
+
+这样手机不再逐帧 JPEG 压缩，局域网传输数据量也明显低于 MJPEG。
