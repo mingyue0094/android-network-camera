@@ -21,7 +21,7 @@ public final class Camera2Controller {
     public Camera2Controller(Context c,Listener l){context=c.getApplicationContext();listener=l;manager=(CameraManager)context.getSystemService(Context.CAMERA_SERVICE);}
     public void start(Surface p,Surface e){
         preview=p;encoder=e;thread=new HandlerThread("camera2");thread.start();handler=new Handler(thread.getLooper());
-        try{String id=backCamera();characteristics=manager.getCameraCharacteristics(id);open(id);}catch(Exception e){error("Camera2启动失败: "+e.getMessage());}
+        try{String id=backCamera();characteristics=manager.getCameraCharacteristics(id);open(id);}catch(Exception ex){error("Camera2启动失败: "+ex.getMessage());}
     }
     private String backCamera()throws CameraAccessException{
         for(String id:manager.getCameraIdList()){Integer f=manager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING);if(f!=null&&f==CameraCharacteristics.LENS_FACING_BACK)return id;}
@@ -37,9 +37,9 @@ public final class Camera2Controller {
     }
     private void session(){
         try{camera.createCaptureSession(Arrays.asList(preview,encoder),new CameraCaptureSession.StateCallback(){
-            public void onConfigured(CameraCaptureSession s){session=s;try{apply();if(listener!=null)listener.onCameraReady(camera.getId());}catch(Exception e){error(e.getMessage());}}
+            public void onConfigured(CameraCaptureSession s){session=s;try{apply();if(listener!=null)listener.onCameraReady(camera.getId());}catch(Exception ex){error(ex.getMessage());}}
             public void onConfigureFailed(CameraCaptureSession s){error("Camera2 Session配置失败");}
-        },handler);}catch(Exception e){error("创建Session失败: "+e.getMessage());}
+        },handler);}catch(Exception ex){error("创建Session失败: "+ex.getMessage());}
     }
     private void apply()throws CameraAccessException{
         if(camera==null||session==null)return;
@@ -63,7 +63,7 @@ public final class Camera2Controller {
     public void setExposure(int x){android.util.Range<Integer> r=characteristics==null?null:characteristics.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE);ev=r==null?x:Math.max(r.getLower(),Math.min(x,r.getUpper()));applyAsync();}
     public void setAutoFocus(){manualFocus=false;applyAsync();}
     public void setManualFocus(float d){focusDistance=Math.max(0,d);manualFocus=true;applyAsync();}
-    private void applyAsync(){if(handler!=null)handler.post(()->{try{apply();}catch(Exception e){error("更新Camera2失败: "+e.getMessage());}});}
+    private void applyAsync(){if(handler!=null)handler.post(()->{try{apply();}catch(Exception ex){error("更新Camera2失败: "+ex.getMessage());}});}
     private void error(String s){if(listener!=null)listener.onError(s==null?"unknown":s);}
     public void stop(){try{if(session!=null)session.close();}catch(Exception ignored){}session=null;try{if(camera!=null)camera.close();}catch(Exception ignored){}camera=null;if(thread!=null){thread.quitSafely();thread=null;handler=null;}}
 }
