@@ -2,6 +2,12 @@ package com.mingyue0094.networkcamera;
 
 import android.app.Activity;
 import android.content.SharedPreferences;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.hardware.Camera;
 import android.os.Bundle;
 import android.view.SurfaceHolder;
@@ -21,6 +27,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private SharedPreferences prefs;
     private int targetFps = 15;
     private float targetZoom = 1.0f;
+    private BroadcastReceiver wifiReceiver;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -33,6 +40,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         server = new MjpegServer();
         try { server.start(); status.setText("网络摄像头启动中..."); }
         catch (IOException e) { status.setText("HTTP 8080 启动失败: " + e.getMessage()); }
+        registerWifiReceiver();
+        updateNetworkStatus();
     }
 
     private View createView() {
@@ -116,6 +125,28 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         return 0;
     }
 
+    private void registerWifiReceiver() {
+        wifiReceiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context context, Intent intent) {
+                updateNetworkStatus();
+            }
+        };
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
+        filter.addAction("android.net.wifi.STATE_CHANGE");
+        filter.addAction("android.net.wifi.WIFI_STATE_CHANGED");
+        registerReceiver(wifiReceiver, filter);
+    }
+
+    private void updateNetworkStatus() {
+        String ip = NetworkUtil.getWifiIp(this);
+        if (ip == null || "0.0.0.0".equals(ip)) {
+            status.setText("WiFi未连接\\n网络摄像头端口: 8080");
+        } else {
+            status.setText("网络摄像头\\nhttp://" + ip + ":8080/");
+        }
+    }
+
     @Override public void surfaceCreated(SurfaceHolder h) { startCamera(); }
 
     private void startCamera() {
@@ -157,7 +188,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             });
             camera.startPreview();
             Camera.Size actual = camera.getParameters().getPreviewSize();
-            status.setText("http://" + NetworkUtil.getWifiIp(this) + ":8080/  "
+            String ip = NetworkUtil.getWifiIp(this);
+            String network = (ip == null || "0.0.0.0".equals(ip))
+                    ? "WiFi未连接  端口:8080"
+                    : "http://" + ip + ":8080/";
+            status.setText(network + "\\n"
                     + actual.width + "x" + actual.height + "  "
                     + getFpsText(camera.getParameters()) + "  "
                     + getZoomText(camera.getParameters()));
@@ -233,6 +268,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     @Override public void surfaceDestroyed(SurfaceHolder h) { releaseCamera(); }
 
     @Override protected void onDestroy() {
+        if (wifiReceiver != null) {
+            try { unregisterReceiver(wifiReceiver); } catch (Exception ignored) {}
+            wifiReceiver = null;
+        }
         releaseCamera();
         if (server != null) { server.stop(); server = null; }
         super.onDestroy();
