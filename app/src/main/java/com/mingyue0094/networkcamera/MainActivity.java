@@ -3,6 +3,7 @@ package com.mingyue0094.networkcamera;
 import android.app.Activity;
 import android.content.*;
 import android.graphics.ImageFormat;
+import android.net.ConnectivityManager;
 import android.hardware.Camera;
 import android.os.Bundle;
 import android.view.*;
