@@ -142,11 +142,16 @@ final class Fmp4Muxer {
         decodeTime+=dur;return cat(moof,box("mdat",sample));
     }
     private byte[] init(){
-        return box("ftyp",str("isom"),u32(0x200),str("isom"),str("iso6"),str("avc1"),str("mp41"),
-            box("moov",mvhd(),box("trak",tkhd(),box("mdia",mdhd(),hdlr(),box("minf",vmhd(),
-                box("dinf",box("dref",cat(u32(1),box("url ",u32(1))))),
-                box("stbl",stsd(),box("stts",u32(0)),box("stsc",u32(0)),box("stsz",u32(0),u32(0)),box("stco",u32(0))))))),
-                box("mvex",box("trex",cat(u32(0),u32(1),u32(1),u32(0),u32(0))))));
+        byte[] stbl=box("stbl",stsd(),box("stts",u32(0)),box("stsc",u32(0)),
+                box("stsz",u32(0),u32(0)),box("stco",u32(0)));
+        byte[] minf=box("minf",vmhd(),box("dinf",
+                box("dref",cat(u32(1),box("url ",u32(1))))),stbl);
+        byte[] mdia=box("mdia",mdhd(),hdlr(),minf);
+        byte[] trak=box("trak",tkhd(),mdia);
+        byte[] moov=box("moov",mvhd(),trak,
+                box("mvex",box("trex",cat(u32(0),u32(1),u32(1),u32(0),u32(0)))));
+        return box("ftyp",str("isom"),u32(0x200),str("isom"),str("iso6"),
+                str("avc1"),str("mp41"),moov);
     }
     private byte[] mvhd(){return cat(u32(0),u32(0),u32(0),u32(timescale),u32(0),u32(0x00010000),u16(0x0100),u16(0),u32(0),u32(0),matrix(),u32(0),u32(0),u32(0),u32(0),u32(0),u32(0),u32(2));}
     private byte[] tkhd(){return cat(u32(7),u32(0),u32(0),u32(1),u32(0),u32(0),u32(0),u16(0),u16(0),u16(0),u16(0),matrix(),u32(width<<16),u32(height<<16));}
