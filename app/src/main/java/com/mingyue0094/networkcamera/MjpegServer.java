@@ -8,6 +8,7 @@ import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.concurrent.atomic.AtomicReference;
+import android.util.Base64;
 
 public class MjpegServer {
     public static final int PORT = 8080;
@@ -15,10 +16,15 @@ public class MjpegServer {
     private volatile boolean running;
     private ServerSocket serverSocket;
     private volatile ConfigHandler configHandler;
+    private volatile String authPassword = "";
 
     public interface ConfigHandler {
         String getStatusJson();
         String applyConfig(String resolution, int fps, float zoom);
+    }
+
+    public void setAuthPassword(String password) {
+        authPassword = password == null ? "" : password;
     }
 
     public void setConfigHandler(ConfigHandler handler) {
@@ -70,6 +76,10 @@ public class MjpegServer {
                 String[] lines = request.split("\\r?\\n");
                 String first = lines.length > 0 ? lines[0] : "";
                 String[] p = first.split(" ");
+                if (!authorized(lines)) {
+                    sendUnauthorized(out);
+                    return;
+                }
                 String method = p.length > 0 ? p[0] : "GET";
                 String path = p.length > 1 ? p[1] : "/";
 
@@ -89,6 +99,31 @@ public class MjpegServer {
             } finally {
                 try { socket.close(); } catch (IOException ignored) {}
             }
+        }
+
+        private boolean authorized(String[] lines) {
+            if (authPassword.length() == 0) return true;
+            String expected = "admin:" + authPassword;
+            String token = null;
+            for (String line : lines) {
+                if (line.regionMatches(true, 0, "Authorization:", 0, 14)) {
+                    String v = line.substring(14).trim();
+                    if (v.regionMatches(true, 0, "Basic ", 0, 6)) token = v.substring(6).trim();
+                }
+            }
+            if (token == null) return false;
+            try {
+                String decoded = new String(Base64.decode(token, Base64.DEFAULT), "UTF-8");
+                return expected.equals(decoded);
+            } catch (Exception e) {
+                return false;
+            }
+        }
+
+        private void sendUnauthorized(OutputStream out) throws IOException {
+            String h = "HTTP/1.0 401 Unauthorized\r\nWWW-Authenticate: Basic realm="Android Network Camera"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            out.write(h.getBytes("ISO-8859-1"));
+            out.flush();
         }
 
         private String readRequest(InputStream in) throws IOException {
