@@ -123,3 +123,66 @@ public class MjpegServer {
         "function start(){if(!window.MediaSource){m.textContent='浏览器不支持 MSE';return}ms=new MediaSource;v.src=URL.createObjectURL(ms);ms.addEventListener('sourceopen',function(){let x='video/mp4; codecs=\"avc1.42E01E\"';if(!MediaSource.isTypeSupported(x)){m.textContent='浏览器不支持 H.264/fMP4';return}sb=ms.addSourceBuffer(x);sb.addEventListener('updateend',pump);ws=new WebSocket('ws://'+location.host+'/video');ws.binaryType='arraybuffer';ws.onopen=()=>m.textContent='视频已连接';ws.onclose=()=>m.textContent='视频断开';ws.onmessage=e=>{q.push(e.data);pump()}})}"+
         "async function load(){try{let j=await(await fetch('/api/status')).json();r.value=j.resolution;f.value=j.fps;b.value=j.bitrate;z.value=j.zoom;m.textContent='当前 '+j.resolution+' / '+j.fps+' FPS / '+(j.bitrate/1000000)+' Mbps'}catch(e){}}async function apply(){m.textContent='正在应用...';try{let j=await(await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({resolution:r.value,fps:+f.value,bitrate:+b.value,zoom:+z.value})})).json();m.textContent=j.ok?'已应用 '+j.resolution+' / '+j.fps+' FPS / '+(j.bitrate/1000000)+' Mbps':'失败：'+j.error}catch(e){m.textContent='请求失败：'+e.message}}start();load();</script>";
 }
+
+final class Fmp4Muxer {
+    private int width,height,fps=30,timescale=90000,sequence=1;
+    private long decodeTime;
+    private byte[] sps,pps;
+    private String codec="avc1.42E01E";
+    private byte[] init;
+    void setFormat(int w,int h,int f,byte[] a,byte[] b){
+        width=w;height=h;fps=Math.max(1,f);sps=strip(a);pps=strip(b);
+        if(sps!=null&&sps.length>=4)codec=String.format(java.util.Locale.US,"avc1.%02X%02X%02X",sps[1]&255,sps[2]&255,sps[3]&255);
+        init=init();decodeTime=0;sequence=1;
+    }
+    byte[] getInit(){return init;}
+    byte[] fragment(byte[] annex,boolean key){
+        if(init==null)return null;byte[] sample=sample(annex);if(sample==null)return null;
+        int dur=Math.max(1,timescale/Math.max(1,fps));byte[] moof=moof(sequence++,decodeTime,dur,sample.length,key);
+        decodeTime+=dur;return cat(moof,box("mdat",sample));
+    }
+    private byte[] init(){
+        return box("ftyp",str("isom"),u32(0x200),str("isom"),str("iso6"),str("avc1"),str("mp41"),
+            box("moov",mvhd(),box("trak",tkhd(),box("mdia",mdhd(),hdlr(),box("minf",vmhd(),
+                box("dinf",box("dref",cat(u32(1),box("url ",u32(1))))),
+                box("stbl",stsd(),box("stts",u32(0)),box("stsc",u32(0)),box("stsz",u32(0),u32(0)),box("stco",u32(0))))))),
+                box("mvex",box("trex",cat(u32(0),u32(1),u32(1),u32(0),u32(0))))));
+    }
+    private byte[] mvhd(){return cat(u32(0),u32(0),u32(0),u32(timescale),u32(0),u32(0x00010000),u16(0x0100),u16(0),u32(0),u32(0),matrix(),u32(0),u32(0),u32(0),u32(0),u32(0),u32(0),u32(2));}
+    private byte[] tkhd(){return cat(u32(7),u32(0),u32(0),u32(1),u32(0),u32(0),u32(0),u16(0),u16(0),u16(0),u16(0),matrix(),u32(width<<16),u32(height<<16));}
+    private byte[] mdhd(){return cat(u32(0),u32(0),u32(0),u32(timescale),u32(0),u16(0x55c4),u16(0));}
+    private byte[] hdlr(){return cat(u32(0),u32(0),str("vide"),u32(0),u32(0),u32(0),str("VideoHandler"),new byte[]{0});}
+    private byte[] vmhd(){return cat(u32(1),u16(0),u16(0),u16(0),u16(0));}
+    private byte[] stsd(){
+        byte[] avc1=cat(new byte[6],u16(1),u16(0),u16(0),u32(0),u32(0),u32(0),u16(width),u16(height),
+            u32(0x00480000),u32(0x00480000),u32(0),u16(1),new byte[32],u16(0x18),u16(0xffff),
+            box("avcC",avcC()),box("btrt",cat(u32(0),u32(4000000),u32(4000000))));
+        return cat(u32(0),u32(1),box("avc1",avc1));
+    }
+    private byte[] avcC(){
+        byte[]s=sps==null?new byte[0]:sps,p=pps==null?new byte[0]:pps;ByteArrayOutputStream o=new ByteArrayOutputStream();
+        o.write(1);o.write(s.length>3?s[1]&255:0x42);o.write(s.length>3?s[2]&255:0);o.write(s.length>3?s[3]&255:0x1e);o.write(0xff);o.write(0xe1);put(o,u16(s.length));put(o,s);o.write(1);put(o,u16(p.length));put(o,p);return o.toByteArray();
+    }
+    private byte[] moof(int seq,long time,int dur,int size,boolean key){
+        byte[]tr=trun(dur,size,key,0);int moofSize=8+box("mfhd",cat(u32(0),u32(seq))).length+box("traf",box("tfhd",cat(u32(0x020000),u32(1))),box("tfdt",cat(u32(0x01000000),u64(time))),box("trun",tr)).length;
+        tr=trun(dur,size,key,moofSize+8);
+        return box("moof",box("mfhd",cat(u32(0),u32(seq))),box("traf",box("tfhd",cat(u32(0x020000),u32(1))),box("tfdt",cat(u32(0x01000000),u64(time))),box("trun",tr)));
+    }
+    private byte[] trun(int d,int s,boolean k,int off){return cat(u32(0x000001|0x000100|0x000200|0x000400),u32(1),u32(off),u32(d),u32(s),u32(k?0x02000000:0x01010000));}
+    private byte[] sample(byte[] b){
+        if(b==null)return null;ByteArrayOutputStream o=new ByteArrayOutputStream(b.length+64);int p=0,n=0;
+        while(true){int st=start(b,p);if(st<0)break;int sc=st+(b[st+2]==1?3:4);int nx=start(b,sc);int end=nx<0?b.length:nx;if(end>sc&&(b[sc]&31)!=7&&(b[sc]&31)!=8){int len=end-sc;put(o,u32(len));o.write(b,sc,len);n++;}
+            if(nx<0)break;p=nx;}
+        return n==0?b:o.toByteArray();
+    }
+    private int start(byte[]b,int p){for(int i=Math.max(0,p);i+3<b.length;i++){if(b[i]==0&&b[i+1]==0&&b[i+2]==1)return i;if(i+4<=b.length&&b[i]==0&&b[i+1]==0&&b[i+2]==0&&b[i+3]==1)return i;}return -1;}
+    private static byte[] strip(byte[]b){if(b==null)return null;int n=b.length>=4&&b[0]==0&&b[1]==0&&b[2]==0&&b[3]==1?4:(b.length>=3&&b[0]==0&&b[1]==0&&b[2]==1?3:0);byte[]r=new byte[b.length-n];System.arraycopy(b,n,r,0,r.length);return r;}
+    private static byte[] box(String t,byte[]...ps){int n=8;for(byte[]p:ps)if(p!=null)n+=p.length;ByteArrayOutputStream o=new ByteArrayOutputStream(n);put(o,u32(n));put(o,str(t));for(byte[]p:ps)put(o,p);return o.toByteArray();}
+    private static byte[]cat(byte[]...aa){int n=0;for(byte[]a:aa)if(a!=null)n+=a.length;byte[]r=new byte[n];int p=0;for(byte[]a:aa)if(a!=null){System.arraycopy(a,0,r,p,a.length);p+=a.length;}return r;}
+    private static byte[]str(String s){try{return s.getBytes("ISO-8859-1");}catch(Exception e){return s.getBytes();}}
+    private static byte[]u16(int v){return new byte[]{(byte)(v>>>8),(byte)v};}
+    private static byte[]u32(long v){return new byte[]{(byte)(v>>>24),(byte)(v>>>16),(byte)(v>>>8),(byte)v};}
+    private static byte[]u64(long v){return new byte[]{(byte)(v>>>56),(byte)(v>>>48),(byte)(v>>>40),(byte)(v>>>32),(byte)(v>>>24),(byte)(v>>>16),(byte)(v>>>8),(byte)v};}
+    private static byte[]matrix(){return cat(u32(0x00010000),u32(0),u32(0),u32(0),u32(0x00010000),u32(0),u32(0),u32(0),u32(0x40000000));}
+    private static void put(ByteArrayOutputStream o,byte[]b){if(b!=null)o.write(b,0,b.length);}
+}
