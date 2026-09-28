@@ -16,6 +16,7 @@ import android.view.View;
 import android.widget.*;
 import android.graphics.ImageFormat;
 import java.io.IOException;
+import android.graphics.ImageFormat;
 import java.util.List;
 
 public class MainActivity extends Activity implements SurfaceHolder.Callback {
