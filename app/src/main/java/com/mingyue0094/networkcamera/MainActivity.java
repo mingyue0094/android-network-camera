@@ -61,21 +61,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
         LinearLayout row = new LinearLayout(this);
 
-        Spinner resolution = new Spinner(this);
+        final Spinner resolution = new Spinner(this);
         final String[] resolutions = {"640x480", "800x600", "1280x720", "1280x960", "1920x1080"};
         ArrayAdapter<String> ra = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, resolutions);
         ra.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         resolution.setAdapter(ra);
         resolution.setSelection(prefs.getInt("resolution", 2));
 
-        Spinner fps = new Spinner(this);
+        final Spinner fps = new Spinner(this);
         final String[] fpsValues = {"5 FPS", "10 FPS", "15 FPS", "20 FPS", "24 FPS", "25 FPS", "30 FPS"};
         ArrayAdapter<String> fa = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, fpsValues);
         fa.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         fps.setAdapter(fa);
         fps.setSelection(savedFpsIndex(prefs.getInt("fps", 15)));
 
-        Spinner zoom = new Spinner(this);
+        final Spinner zoom = new Spinner(this);
         final String[] zoomValues = {"1x", "1.5x", "2x", "3x", "4x", "6x", "8x"};
         ArrayAdapter<String> za = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, zoomValues);
         za.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
