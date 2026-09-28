@@ -121,7 +121,7 @@ public class MjpegServer {
         }
 
         private void sendUnauthorized(OutputStream out) throws IOException {
-            String h = "HTTP/1.0 401 Unauthorized\r\nWWW-Authenticate: Basic realm="Android Network Camera"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            String h = "HTTP/1.0 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\\"Android Network Camera\\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
             out.write(h.getBytes("ISO-8859-1"));
             out.flush();
         }
