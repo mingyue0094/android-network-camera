@@ -1,6 +1,8 @@
 package com.mingyue0094.networkcamera;
 
 import java.io.BufferedOutputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
@@ -19,16 +21,18 @@ public final class Fmp4Server {
         server = new ServerSocket(8080);
         running = true;
         Thread t = new Thread(() -> {
-            while (running) try {
-                Socket s = server.accept();
-                s.setTcpNoDelay(true);
-                Client c = new Client(s);
-                synchronized (lock) {
-                    clients.add(c);
+            while (running) {
+                try {
+                    Socket s = server.accept();
+                    s.setTcpNoDelay(true);
+                    Client c = new Client(s);
+                    synchronized (lock) {
+                        clients.add(c);
+                    }
+                    c.start();
+                } catch (Exception e) {
+                    if (!running) break;
                 }
-                c.start();
-            } catch (Exception e) {
-                if (!running) break;
             }
         }, "fmp4-http");
         t.setDaemon(true);
@@ -57,7 +61,7 @@ public final class Fmp4Server {
     public void stop() {
         running = false;
         try {
-            server.close();
+            if (server != null) server.close();
         } catch (Exception ignored) {
         }
         synchronized (lock) {
@@ -92,6 +96,33 @@ public final class Fmp4Server {
 
         public void run() {
             try {
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(socket.getInputStream(), "US-ASCII"));
+                String request = reader.readLine();
+                if (request == null) {
+                    close();
+                    return;
+                }
+
+                String path = "/";
+                String[] parts = request.split(" ");
+                if (parts.length >= 2) path = parts[1];
+
+                while (true) {
+                    String line = reader.readLine();
+                    if (line == null || line.length() == 0) break;
+                }
+
+                if (path.equals("/help") || path.equals("/help/")) {
+                    sendHelp();
+                    return;
+                }
+
+                if (!path.equals("/video.mp4")) {
+                    send404();
+                    return;
+                }
+
                 BufferedOutputStream out =
                         new BufferedOutputStream(socket.getOutputStream(), 65536);
 
@@ -108,12 +139,42 @@ public final class Fmp4Server {
                 byte[] x = init;
                 if (x != null) chunk(out, x);
 
-                while (alive && running) chunk(out, q.take());
+                while (alive && running) {
+                    chunk(out, q.take());
+                }
             } catch (Exception ignored) {
             } finally {
                 close();
                 remove(this);
             }
+        }
+
+        private void sendHelp() throws Exception {
+            byte[] body = helpPage().getBytes("UTF-8");
+            BufferedOutputStream out =
+                    new BufferedOutputStream(socket.getOutputStream(), 8192);
+            out.write((
+                    "HTTP/1.1 200 OK\r\n"
+                    + "Content-Type: text/html; charset=utf-8\r\n"
+                    + "Content-Length: " + body.length + "\r\n"
+                    + "Cache-Control: no-cache\r\n"
+                    + "Access-Control-Allow-Origin: *\r\n\r\n"
+            ).getBytes("US-ASCII"));
+            out.write(body);
+            out.flush();
+        }
+
+        private void send404() throws Exception {
+            byte[] body = "404 Not Found\n".getBytes("UTF-8");
+            BufferedOutputStream out =
+                    new BufferedOutputStream(socket.getOutputStream(), 1024);
+            out.write((
+                    "HTTP/1.1 404 Not Found\r\n"
+                    + "Content-Type: text/plain; charset=utf-8\r\n"
+                    + "Content-Length: " + body.length + "\r\n\r\n"
+            ).getBytes("US-ASCII"));
+            out.write(body);
+            out.flush();
         }
 
         void chunk(BufferedOutputStream out, byte[] b) throws Exception {
@@ -138,102 +199,77 @@ public final class Fmp4Server {
     }
 
     private static String helpPage() {
-        return "<!doctype html><html><head><meta charset="utf-8">"
+        return "<!doctype html><html><head><meta charset=\"utf-8\">"
+                + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
                 + "<title>Android Network Camera API</title>"
                 + "<style>body{font-family:Arial,sans-serif;line-height:1.6;"
                 + "max-width:900px;margin:40px auto;padding:0 20px}"
                 + "code,pre{background:#f4f4f4;padding:3px 6px;border-radius:4px}"
                 + "pre{padding:14px;overflow:auto}h1{margin-bottom:4px}"
-                + "table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;"
-                + "padding:8px;text-align:left}</style></head><body>"
+                + "table{border-collapse:collapse;width:100%}"
+                + "td,th{border:1px solid #ccc;padding:8px;text-align:left}</style>"
+                + "</head><body>"
                 + "<h1>Android Network Camera</h1>"
-                + "<p>手机硬件 H.264 摄像头 HTTP 视频服务。</p>"
-                + "<h2>接口</h2>"
-                + "<table><tr><th>路径</th><th>方法</th><th>说明</th></tr>"
-                + "<tr><td><code>/help</code></td><td>GET</td>"
-                + "<td>显示 API 使用说明</td></tr>"
-                + "<tr><td><code>/video.mp4</code></td><td>GET</td>"
-                + "<td>持续输出 fragmented MP4 视频流</td></tr></table>"
-                + "<h2>视频流</h2>"
+                + "<p>Camera2 + MediaCodec 硬件 H.264 + fMP4 HTTP 摄像头服务。</p>"
+
+                + "<h2>API 接口</h2>"
+                + "<table><tr><th>方法</th><th>路径</th><th>说明</th></tr>"
+                + "<tr><td>GET</td><td><code>/help</code></td>"
+                + "<td>显示本 API 使用说明</td></tr>"
+                + "<tr><td>GET</td><td><code>/video.mp4</code></td>"
+                + "<td>持续输出 fragmented MP4 视频流</td></tr>"
+                + "</table>"
+
+                + "<h2>1. 查看帮助</h2>"
+                + "<pre>GET http://手机IP:8080/help</pre>"
+                + "<p>例如：</p>"
+                + "<pre>http://192.168.1.123:8080/help</pre>"
+
+                + "<h2>2. 获取视频</h2>"
                 + "<pre>GET http://手机IP:8080/video.mp4</pre>"
-                + "<p>示例：</p>"
+                + "<p>例如：</p>"
                 + "<pre>http://192.168.1.123:8080/video.mp4</pre>"
-                + "<h2>视频参数</h2>"
-                + "<ul><li>编码：H.264 / AVC</li>"
+                + "<p>该接口不是普通一次性 MP4 文件，而是持续输出的 fMP4 视频流。</p>"
+
+                + "<h2>3. 视频参数</h2>"
+                + "<ul>"
+                + "<li>视频编码：H.264 / AVC</li>"
                 + "<li>输入：Camera2 Surface</li>"
-                + "<li>编码：Android MediaCodec 硬件编码器</li>"
-                + "<li>默认分辨率：1920x1080</li>"
+                + "<li>编码器：Android MediaCodec Surface 输入</li>"
+                + "<li>默认分辨率：1920 × 1080</li>"
                 + "<li>默认帧率：30 FPS</li>"
                 + "<li>默认码率：12 Mbps</li>"
-                + "<li>关键帧间隔：1 秒</li></ul>"
-                + "<h2>YOLO / PC 取流</h2>"
-                + "<p>PC 端建议使用 FFmpeg 读取 HTTP fMP4，再将解码后的帧送入 YOLO。</p>"
-                + "<pre>ffmpeg -i http://手机IP:8080/video.mp4 -f rawvideo -pix_fmt bgr24 pipe:1</pre>"
-                + "<h2>数据流结构</h2>"
-                + "<pre>Camera2"
-                + " -> MediaCodec(H.264)"
-                + " -> fMP4"
+                + "<li>关键帧间隔：1 秒</li>"
+                + "</ul>"
+
+                + "<h2>4. YOLO / PC 取流</h2>"
+                + "<p>PC 端可使用 FFmpeg 读取：</p>"
+                + "<pre>ffmpeg -i http://手机IP:8080/video.mp4 "
+                + "-f rawvideo -pix_fmt bgr24 pipe:1</pre>"
+                + "<p>然后将原始帧送入 OpenCV / YOLO。</p>"
+
+                + "<h2>5. 数据流</h2>"
+                + "<pre>Camera2 Surface"
+                + " -> MediaCodec H.264"
+                + " -> fMP4 Muxer"
                 + " -> HTTP :8080"
                 + " -> PC / YOLO</pre>"
-                + "<h2>注意</h2>"
-                + "<ul><li>手机和电脑需要处于可互通的网络。</li>"
-                + "<li>8080 是视频 HTTP 服务端口。</li>"
-                + "<li>/video.mp4 是持续流，不是普通一次性 MP4 文件。</li>"
-                + "</ul></body></html>";
-    }
 
-    private void handleHttp(Socket socket) throws Exception {
-        java.io.BufferedReader reader = new java.io.BufferedReader(
-                new java.io.InputStreamReader(socket.getInputStream(), "US-ASCII"));
-        String request = reader.readLine();
-        if (request == null) {
-            socket.close();
-            return;
-        }
+                + "<h2>6. 网络要求</h2>"
+                + "<ul>"
+                + "<li>手机和 PC 必须能够互相访问。</li>"
+                + "<li>手机端 HTTP 服务端口为 8080。</li>"
+                + "<li>PC 访问手机的局域网 IP。</li>"
+                + "</ul>"
 
-        String path = "/";
-        String[] parts = request.split(" ");
-        if (parts.length >= 2) path = parts[1];
+                + "<h2>7. 当前接口示例</h2>"
+                + "<pre>"
+                + "浏览器：\n"
+                + "http://手机IP:8080/help\n\n"
+                + "视频：\n"
+                + "http://手机IP:8080/video.mp4"
+                + "</pre>"
 
-        while (true) {
-            String line = reader.readLine();
-            if (line == null || line.length() == 0) break;
-        }
-
-        if (path.equals("/help") || path.equals("/help/")) {
-            byte[] body = helpPage().getBytes("UTF-8");
-            BufferedOutputStream out =
-                    new BufferedOutputStream(socket.getOutputStream(), 8192);
-            out.write(("HTTP/1.1 200 OK\r\n"
-                    + "Content-Type: text/html; charset=utf-8\r\n"
-                    + "Content-Length: " + body.length + "\r\n"
-                    + "Cache-Control: no-cache\r\n"
-                    + "Access-Control-Allow-Origin: *\r\n\r\n")
-                    .getBytes("US-ASCII"));
-            out.write(body);
-            out.flush();
-            socket.close();
-            return;
-        }
-
-        if (!path.equals("/video.mp4")) {
-            byte[] body = "404 Not Found\n".getBytes("UTF-8");
-            BufferedOutputStream out =
-                    new BufferedOutputStream(socket.getOutputStream(), 1024);
-            out.write(("HTTP/1.1 404 Not Found\r\n"
-                    + "Content-Type: text/plain; charset=utf-8\r\n"
-                    + "Content-Length: " + body.length + "\r\n\r\n")
-                    .getBytes("US-ASCII"));
-            out.write(body);
-            out.flush();
-            socket.close();
-            return;
-        }
-
-        sseVideo(socket);
-    }
-
-    private void sseVideo(Socket socket) {
-        // This method is intentionally empty. Video clients are handled by Client.run().
+                + "</body></html>";
     }
 }
