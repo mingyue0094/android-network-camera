@@ -20,6 +20,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private MjpegServer server;
     private SharedPreferences prefs;
     private int targetFps = 15;
+    private float targetZoom = 1.0f;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -50,6 +51,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         panel.addView(status);
 
         LinearLayout row = new LinearLayout(this);
+
         Spinner resolution = new Spinner(this);
         final String[] resolutions = {"640x480", "800x600", "1280x720", "1280x960", "1920x1080"};
         ArrayAdapter<String> ra = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, resolutions);
@@ -64,10 +66,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         fps.setAdapter(fa);
         fps.setSelection(savedFpsIndex(prefs.getInt("fps", 15)));
 
+        Spinner zoom = new Spinner(this);
+        final String[] zoomValues = {"1x", "1.5x", "2x", "3x", "4x", "6x", "8x"};
+        ArrayAdapter<String> za = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, zoomValues);
+        za.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        zoom.setAdapter(za);
+        zoom.setSelection(savedZoomIndex(prefs.getFloat("zoom", 1.0f)));
+
         Button apply = new Button(this);
         apply.setText("应用");
         row.addView(resolution);
         row.addView(fps);
+        row.addView(zoom);
         row.addView(apply);
         panel.addView(row);
 
@@ -81,10 +91,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 int[] widths = {640, 800, 1280, 1280, 1920};
                 int[] heights = {480, 600, 720, 960, 1080};
                 int[] fpsList = {5, 10, 15, 20, 24, 25, 30};
+                float[] zoomList = {1f, 1.5f, 2f, 3f, 4f, 6f, 8f};
                 int fi = fps.getSelectedItemPosition();
-                prefs.edit().putInt("resolution", ri).putInt("fps", fpsList[fi]).apply();
+                int zi = zoom.getSelectedItemPosition();
+                prefs.edit().putInt("resolution", ri).putInt("fps", fpsList[fi])
+                        .putFloat("zoom", zoomList[zi]).apply();
                 targetFps = fpsList[fi];
-                if (camera != null) restartCamera(widths[ri], heights[ri], targetFps);
+                targetZoom = zoomList[zi];
+                if (camera != null) restartCamera(widths[ri], heights[ri], targetFps, targetZoom);
             }
         });
         return root;
@@ -96,6 +110,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         return 2;
     }
 
+    private int savedZoomIndex(float zoom) {
+        float[] values = {1f, 1.5f, 2f, 3f, 4f, 6f, 8f};
+        for (int i = 0; i < values.length; i++) if (Math.abs(values[i] - zoom) < 0.01f) return i;
+        return 0;
+    }
+
     @Override public void surfaceCreated(SurfaceHolder h) { startCamera(); }
 
     private void startCamera() {
@@ -103,10 +123,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         int[] widths = {640, 800, 1280, 1280, 1920};
         int[] heights = {480, 600, 720, 960, 1080};
         targetFps = prefs.getInt("fps", 15);
-        restartCamera(widths[ri], heights[ri], targetFps);
+        targetZoom = prefs.getFloat("zoom", 1.0f);
+        restartCamera(widths[ri], heights[ri], targetFps, targetZoom);
     }
 
-    private void restartCamera(int wantedW, int wantedH, int fps) {
+    private void restartCamera(int wantedW, int wantedH, int fps, float zoom) {
         releaseCamera();
         try {
             camera = Camera.open();
@@ -116,6 +137,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             params.setPreviewFormat(ImageFormat.NV21);
             params.setJpegQuality(75);
             setFps(params, fps);
+            setZoom(params, zoom);
             camera.setParameters(params);
             camera.setPreviewDisplay(holder);
             camera.setDisplayOrientation(0);
@@ -136,7 +158,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             camera.startPreview();
             Camera.Size actual = camera.getParameters().getPreviewSize();
             status.setText("http://" + NetworkUtil.getWifiIp(this) + ":8080/  "
-                    + actual.width + "x" + actual.height + "  " + getFpsText(camera.getParameters()));
+                    + actual.width + "x" + actual.height + "  "
+                    + getFpsText(camera.getParameters()) + "  "
+                    + getZoomText(camera.getParameters()));
         } catch (Exception e) {
             status.setText("摄像头启动失败: " + e.getMessage());
             releaseCamera();
@@ -157,6 +181,35 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             }
             p.setPreviewFpsRange(best[0], best[1]);
         } catch (Exception ignored) {}
+    }
+
+    private void setZoom(Camera.Parameters p, float wanted) {
+        try {
+            if (!p.isZoomSupported()) return;
+            List<Integer> ratios = p.getZoomRatios();
+            int max = p.getMaxZoom();
+            if (ratios == null || ratios.isEmpty() || max <= 0) return;
+            int best = 0;
+            int bestDiff = Integer.MAX_VALUE;
+            int target = Math.round(wanted * 100);
+            for (int i = 0; i < ratios.size(); i++) {
+                int diff = Math.abs(ratios.get(i) - target);
+                if (diff < bestDiff) { best = i; bestDiff = diff; }
+            }
+            if (best > max) best = max;
+            p.setZoom(best);
+        } catch (Exception ignored) {}
+    }
+
+    private String getZoomText(Camera.Parameters p) {
+        try {
+            if (!p.isZoomSupported()) return "Zoom不支持";
+            List<Integer> ratios = p.getZoomRatios();
+            int index = p.getZoom();
+            if (ratios != null && index >= 0 && index < ratios.size())
+                return String.format(java.util.Locale.US, "%.1fx", ratios.get(index) / 100.0f);
+        } catch (Exception ignored) {}
+        return targetZoom + "x";
     }
 
     private String getFpsText(Camera.Parameters p) {
