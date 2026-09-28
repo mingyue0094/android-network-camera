@@ -1,285 +1,39 @@
 package com.mingyue0094.networkcamera;
 
-import android.media.MediaCodec;
-import android.media.MediaCodecInfo;
-import android.media.MediaCodecList;
-import android.media.MediaFormat;
+import android.media.*;
 import android.view.Surface;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
 public final class H264Encoder {
-    public interface Listener {
-        void onCodecReady(String name);
-        void onConfig(byte[] sps, byte[] pps);
-        void onFrame(byte[] sample, long ptsUs, boolean key);
-        void onError(String message);
+    public interface Listener{void onCodecReady(String name);void onConfig(byte[] sps,byte[] pps);void onFrame(byte[] sample,long ptsUs,boolean key);void onError(String msg);}
+    private final Listener listener;private MediaCodec codec;private Surface surface;private Thread thread;private volatile boolean running;private byte[] sps,pps;
+    public H264Encoder(Listener l){listener=l;}
+    public synchronized Surface start(int w,int h,int fps,int kbps,int iframe)throws Exception{
+        stop();MediaCodecInfo info=find();
+        if(info==null)throw new IllegalStateException("没有支持Surface输入的硬件H.264编码器");
+        MediaFormat f=MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC,w,h);
+        f.setInteger(MediaFormat.KEY_COLOR_FORMAT,MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+        f.setInteger(MediaFormat.KEY_BIT_RATE,kbps*1000);f.setInteger(MediaFormat.KEY_FRAME_RATE,fps);f.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL,iframe);
+        codec=MediaCodec.createByCodecName(info.getName());codec.configure(f,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE);surface=codec.createInputSurface();codec.start();running=true;
+        if(listener!=null)listener.onCodecReady(info.getName());thread=new Thread(this::drain,"h264-output");thread.setDaemon(true);thread.start();return surface;
     }
-
-    private final Listener listener;
-    private MediaCodec codec;
-    private Surface inputSurface;
-    private Thread outputThread;
-    private volatile boolean running;
-
-    public H264Encoder(Listener listener) {
-        this.listener = listener;
-    }
-
-    public synchronized Surface start(int width, int height, int fps,
-                                      int bitrateKbps, int iFrameInterval)
-            throws Exception {
-        stop();
-
-        MediaCodecInfo info = findSurfaceAvcEncoder();
-        if (info == null) {
-            throw new IllegalStateException("没有找到支持 Surface 输入的硬件 H.264 编码器");
-        }
-
-        MediaFormat format = MediaFormat.createVideoFormat(
-                MediaFormat.MIMETYPE_VIDEO_AVC, width, height);
-        format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
-        format.setInteger(MediaFormat.KEY_BIT_RATE, bitrateKbps * 1000);
-        format.setInteger(MediaFormat.KEY_FRAME_RATE, fps);
-        format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, iFrameInterval);
-
-        codec = MediaCodec.createByCodecName(info.getName());
-        codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
-        inputSurface = codec.createInputSurface();
-        codec.start();
-
-        running = true;
-        if (listener != null) {
-            listener.onCodecReady(info.getName());
-        }
-
-        outputThread = new Thread(this::drainLoop, "h264-output");
-        outputThread.setDaemon(true);
-        outputThread.start();
-        return inputSurface;
-    }
-
-    private void drainLoop() {
-        MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
-
-        while (running) {
-            try {
-                int index = codec.dequeueOutputBuffer(info, 10000);
-
-                if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    readFormat(codec.getOutputFormat());
-                    continue;
-                }
-
-                if (index < 0) {
-                    continue;
-                }
-
-                ByteBuffer buffer = codec.getOutputBuffer(index);
-                if (buffer != null && info.size > 0) {
-                    byte[] data = new byte[info.size];
-                    buffer.position(info.offset);
-                    buffer.limit(info.offset + info.size);
-                    buffer.get(data);
-
-                    if ((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-                        readConfig(data);
-                    } else {
-                        boolean key = (info.flags &
-                                MediaCodec.BUFFER_FLAG_SYNC_FRAME) != 0;
-                        byte[] avcc = annexBToAvcc(data);
-                        if (avcc.length > 0 && listener != null) {
-                            listener.onFrame(avcc, info.presentationTimeUs, key);
-                        }
-                    }
-                }
-
-                codec.releaseOutputBuffer(index, false);
-            } catch (Exception e) {
-                if (running && listener != null) {
-                    listener.onError("H.264 输出异常: " + e.getMessage());
-                }
-                break;
-            }
-        }
-    }
-
-    private byte[] currentSps;
-    private byte[] currentPps;
-
-    private void readFormat(MediaFormat format) {
-        try {
-            ByteBuffer a = format.getByteBuffer("csd-0");
-            ByteBuffer b = format.getByteBuffer("csd-1");
-            if (a != null) {
-                byte[] x = new byte[a.remaining()];
-                a.duplicate().get(x);
-                extractConfig(x);
-            }
-            if (b != null) {
-                byte[] x = new byte[b.remaining()];
-                b.duplicate().get(x);
-                extractConfig(x);
-            }
-            notifyConfig();
-        } catch (Exception e) {
-            if (listener != null) {
-                listener.onError("读取 H.264 SPS/PPS 失败: " + e.getMessage());
-            }
-        }
-    }
-
-    private void readConfig(byte[] data) {
-        extractConfig(data);
-        notifyConfig();
-    }
-
-    private void extractConfig(byte[] data) {
-        List<byte[]> nals = splitAnnexB(data);
-        if (!nals.isEmpty()) {
-            for (byte[] nal : nals) {
-                if (nal.length == 0) continue;
-                int type = nal[0] & 0x1f;
-                if (type == 7) currentSps = nal;
-                if (type == 8) currentPps = nal;
-            }
-            return;
-        }
-
-        if (data.length > 4) {
-            int len = ((data[0] & 255) << 24) |
-                    ((data[1] & 255) << 16) |
-                    ((data[2] & 255) << 8) |
-                    (data[3] & 255);
-            if (len > 0 && len <= data.length - 4) {
-                byte[] nal = new byte[len];
-                System.arraycopy(data, 4, nal, 0, len);
-                int type = nal[0] & 0x1f;
-                if (type == 7) currentSps = nal;
-                if (type == 8) currentPps = nal;
-            }
-        }
-    }
-
-    private void notifyConfig() {
-        if (currentSps != null && currentPps != null && listener != null) {
-            listener.onConfig(currentSps.clone(), currentPps.clone());
-        }
-    }
-
-    private byte[] annexBToAvcc(byte[] data) {
-        List<byte[]> nals = splitAnnexB(data);
-        if (nals.isEmpty()) return data;
-
-        int size = 0;
-        for (byte[] nal : nals) size += 4 + nal.length;
-
-        ByteBuffer out = ByteBuffer.allocate(size);
-        for (byte[] nal : nals) {
-            out.putInt(nal.length);
-            out.put(nal);
-        }
-        return out.array();
-    }
-
-    private static List<byte[]> splitAnnexB(byte[] data) {
-        List<byte[]> result = new ArrayList<>();
-        int start = -1;
-
-        for (int i = 0; i < data.length - 3; i++) {
-            int prefix = 0;
-            if (data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1) {
-                prefix = 3;
-            } else if (data[i] == 0 && data[i + 1] == 0 &&
-                    data[i + 2] == 0 && data[i + 3] == 1) {
-                prefix = 4;
-            }
-
-            if (prefix == 0) continue;
-
-            if (start >= 0) {
-                int end = i;
-                while (end > start && data[end - 1] == 0) end--;
-                if (end > start) {
-                    byte[] nal = new byte[end - start];
-                    System.arraycopy(data, start, nal, 0, nal.length);
-                    result.add(nal);
-                }
-            }
-
-            start = i + prefix;
-            i += prefix - 1;
-        }
-
-        if (start >= 0 && start < data.length) {
-            int end = data.length;
-            while (end > start && data[end - 1] == 0) end--;
-            if (end > start) {
-                byte[] nal = new byte[end - start];
-                System.arraycopy(data, start, nal, 0, nal.length);
-                result.add(nal);
-            }
-        }
-        return result;
-    }
-
-    private static MediaCodecInfo findSurfaceAvcEncoder() {
-        MediaCodecInfo[] infos =
-                new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos();
-
-        for (MediaCodecInfo info : infos) {
-            if (!info.isEncoder()) continue;
-
-            boolean avc = false;
-            for (String type : info.getSupportedTypes()) {
-                if (MediaFormat.MIMETYPE_VIDEO_AVC.equalsIgnoreCase(type)) {
-                    avc = true;
-                    break;
-                }
-            }
-            if (!avc) continue;
-
-            try {
-                MediaCodecInfo.CodecCapabilities caps =
-                        info.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC);
-
-                for (int color : caps.colorFormats) {
-                    if (color == MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface) {
-                        return info;
-                    }
-                }
-            } catch (Exception ignored) {
-            }
-        }
-        return null;
-    }
-
-    public String getCodecName() {
-        return codec == null ? "" : codec.getName();
-    }
-
-    public synchronized void stop() {
-        running = false;
-
-        if (outputThread != null) {
-            outputThread.interrupt();
-            outputThread = null;
-        }
-
-        if (codec != null) {
-            try { codec.stop(); } catch (Exception ignored) {}
-            try { codec.release(); } catch (Exception ignored) {}
-            codec = null;
-        }
-
-        if (inputSurface != null) {
-            try { inputSurface.release(); } catch (Exception ignored) {}
-            inputSurface = null;
-        }
-
-        currentSps = null;
-        currentPps = null;
-    }
+    private void drain(){MediaCodec.BufferInfo bi=new MediaCodec.BufferInfo();while(running)try{
+        int i=codec.dequeueOutputBuffer(bi,10000);
+        if(i==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){format(codec.getOutputFormat());continue;}
+        if(i<0)continue;ByteBuffer b=codec.getOutputBuffer(i);
+        if(b!=null&&bi.size>0){b.position(bi.offset);b.limit(bi.offset+bi.size);byte[] d=new byte[bi.size];b.get(d);
+            if((bi.flags&MediaCodec.BUFFER_FLAG_CODEC_CONFIG)!=0){config(d);}else{boolean key=(bi.flags&MediaCodec.BUFFER_FLAG_SYNC_FRAME)!=0;if(listener!=null)listener.onFrame(toAvcc(d),bi.presentationTimeUs,key);}}
+        codec.releaseOutputBuffer(i,false);
+    }catch(Exception e){if(running&&listener!=null)listener.onError("H.264输出异常: "+e.getMessage());break;}}
+    private void format(MediaFormat f){try{ByteBuffer a=f.getByteBuffer("csd-0"),b=f.getByteBuffer("csd-1");if(a!=null)config(read(a));if(b!=null)config(read(b));notifyConfig();}catch(Exception e){if(listener!=null)listener.onError("SPS/PPS读取失败: "+e.getMessage());}}
+    private void config(byte[] d){for(byte[] n:split(d)){if(n.length==0)continue;int t=n[0]&31;if(t==7)sps=n;if(t==8)pps=n;}notifyConfig();}
+    private void notifyConfig(){if(sps!=null&&pps!=null&&listener!=null)listener.onConfig(sps.clone(),pps.clone());}
+    private static byte[] read(ByteBuffer b){ByteBuffer x=b.duplicate();byte[] d=new byte[x.remaining()];x.get(d);return d;}
+    private static byte[] toAvcc(byte[] d){List<byte[]> n=split(d);if(n.isEmpty())return d;int z=0;for(byte[] x:n)z+=4+x.length;ByteBuffer b=ByteBuffer.allocate(z);for(byte[] x:n){b.putInt(x.length);b.put(x);}return b.array();}
+    private static List<byte[]> split(byte[] d){List<byte[]> r=new ArrayList<>();int s=-1;for(int i=0;i<d.length-3;i++){int p=0;if(d[i]==0&&d[i+1]==0&&d[i+2]==1)p=3;else if(d[i]==0&&d[i+1]==0&&d[i+2]==0&&d[i+3]==1)p=4;if(p==0)continue;if(s>=0){int e=i;while(e>s&&d[e-1]==0)e--;if(e>s){byte[] n=new byte[e-s];System.arraycopy(d,s,n,0,n.length);r.add(n);}}s=i+p;i+=p-1;}if(s>=0&&s<d.length){int e=d.length;while(e>s&&d[e-1]==0)e--;if(e>s){byte[] n=new byte[e-s];System.arraycopy(d,s,n,0,n.length);r.add(n);}}return r;}
+    private static MediaCodecInfo find(){for(MediaCodecInfo i:new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos()){if(!i.isEncoder())continue;try{MediaCodecInfo.CodecCapabilities c=i.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC);for(int x:c.colorFormats)if(x==MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)return i;}catch(Exception ignored){}}return null;}
+    public String getCodecName(){return codec==null?"":codec.getName();}
+    public synchronized void stop(){running=false;if(thread!=null){thread.interrupt();thread=null;}if(codec!=null){try{codec.stop();}catch(Exception ignored){}try{codec.release();}catch(Exception ignored){}codec=null;}if(surface!=null){try{surface.release();}catch(Exception ignored){}surface=null;}sps=pps=null;}
 }
