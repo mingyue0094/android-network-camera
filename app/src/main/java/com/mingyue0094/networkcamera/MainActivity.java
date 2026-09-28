@@ -243,46 +243,114 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
     private void restartCamera(int wantedW, int wantedH, int fps, float zoom) {
         releaseCamera();
+
+        // HTTP 服务和摄像头是两个独立服务，先明确显示 HTTP 状态。
+        String ip = NetworkUtil.getWifiIp(this);
+        String network = (ip == null || "0.0.0.0".equals(ip))
+                ? "HTTP服务: 8080 OK\\nWiFi未连接"
+                : "HTTP服务: 8080 OK\\nhttp://" + ip + ":8080/";
+        status.setText(network + "\\n摄像头: 正在启动...");
+
         try {
             camera = Camera.open();
-            Camera.Parameters params = camera.getParameters();
+        } catch (Exception e) {
+            status.setText(network + "\\n摄像头: Camera.open 失败\\n"
+                    + formatException(e));
+            releaseCamera();
+            return;
+        }
+
+        Camera.Parameters params;
+        try {
+            params = camera.getParameters();
+        } catch (Exception e) {
+            status.setText(network + "\\n摄像头: getParameters 失败\\n"
+                    + formatException(e));
+            releaseCamera();
+            return;
+        }
+
+        try {
             Camera.Size size = chooseClosestSize(params.getSupportedPreviewSizes(), wantedW, wantedH);
-            if (size != null) params.setPreviewSize(size.width, size.height);
+            if (size == null) throw new IOException("没有可用的预览分辨率");
+            params.setPreviewSize(size.width, size.height);
+        } catch (Exception e) {
+            status.setText(network + "\\n摄像头: 设置分辨率失败\\n"
+                    + formatException(e));
+            releaseCamera();
+            return;
+        }
+
+        try {
             params.setPreviewFormat(ImageFormat.NV21);
             params.setJpegQuality(75);
             setFps(params, fps);
             setZoom(params, zoom);
+        } catch (Exception e) {
+            status.setText(network + "\\n摄像头: 设置参数失败\\n"
+                    + formatException(e));
+            releaseCamera();
+            return;
+        }
+
+        try {
             camera.setParameters(params);
+        } catch (Exception e) {
+            status.setText(network + "\\n摄像头: camera.setParameters 失败\\n"
+                    + formatException(e));
+            releaseCamera();
+            return;
+        }
+
+        try {
             camera.setPreviewDisplay(holder);
             camera.setDisplayOrientation(0);
+        } catch (Exception e) {
+            status.setText(network + "\\n摄像头: 绑定预览画面失败\\n"
+                    + formatException(e));
+            releaseCamera();
+            return;
+        }
 
-            camera.setPreviewCallback(new Camera.PreviewCallback() {
-                @Override public void onPreviewFrame(byte[] data, Camera c) {
-                    if (server == null || data == null) return;
+        camera.setPreviewCallback(new Camera.PreviewCallback() {
+            @Override public void onPreviewFrame(byte[] data, Camera c) {
+                if (server == null || data == null) return;
+                try {
                     Camera.Size s = c.getParameters().getPreviewSize();
-                    try {
-                        android.graphics.YuvImage yuv = new android.graphics.YuvImage(
-                                data, ImageFormat.NV21, s.width, s.height, null);
-                        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-                        yuv.compressToJpeg(new android.graphics.Rect(0, 0, s.width, s.height), 75, baos);
-                        server.updateFrame(baos.toByteArray());
-                    } catch (Exception ignored) {}
-                }
-            });
+                    android.graphics.YuvImage yuv = new android.graphics.YuvImage(
+                            data, ImageFormat.NV21, s.width, s.height, null);
+                    java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                    yuv.compressToJpeg(new android.graphics.Rect(0, 0, s.width, s.height), 75, baos);
+                    server.updateFrame(baos.toByteArray());
+                } catch (Exception ignored) {}
+            }
+        });
+
+        try {
             camera.startPreview();
+        } catch (Exception e) {
+            status.setText(network + "\\n摄像头: camera.startPreview 失败\\n"
+                    + formatException(e));
+            releaseCamera();
+            return;
+        }
+
+        try {
             Camera.Size actual = camera.getParameters().getPreviewSize();
-            String ip = NetworkUtil.getWifiIp(this);
-            String network = (ip == null || "0.0.0.0".equals(ip))
-                    ? "WiFi未连接  端口:8080"
-                    : "http://" + ip + ":8080/";
-            status.setText(network + "\\n"
+            status.setText(network + "\\n摄像头: OK\\n"
                     + actual.width + "x" + actual.height + "  "
                     + getFpsText(camera.getParameters()) + "  "
                     + getZoomText(camera.getParameters()));
         } catch (Exception e) {
-            status.setText("摄像头启动失败: " + e.getMessage());
-            releaseCamera();
+            status.setText(network + "\\n摄像头: 已启动（读取实际参数失败）\\n"
+                    + formatException(e));
         }
+    }
+
+    private String formatException(Exception e) {
+        String msg = e.getMessage();
+        if (msg == null || msg.length() == 0) msg = e.toString();
+        return e.getClass().getSimpleName() + ": " + msg;
     }
 
     private void setFps(Camera.Parameters p, int wanted) {
