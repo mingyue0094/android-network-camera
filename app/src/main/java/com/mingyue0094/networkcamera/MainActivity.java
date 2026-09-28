@@ -181,7 +181,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                     .putInt("fps", fps).putFloat("zoom", zoom).apply();
             targetFps = fps;
             targetZoom = zoom;
-            if (camera != null) restartCamera(w, h, fps, zoom);
+            if (camera == null) {
+                return "{\"ok\":false,\"error\":\"camera not running\"}";
+            }
+            restartCamera(w, h, fps, zoom);
+            if (camera == null) {
+                return "{\"ok\":false,\"error\":\"camera restart failed\"}";
+            }
             return getWebStatusJson();
         } catch (Exception e) {
             return "{\"ok\":false,\"error\":\"invalid parameters\"}";
@@ -224,9 +230,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private void updateNetworkStatus() {
         String ip = NetworkUtil.getWifiIp(this);
         if (ip == null || "0.0.0.0".equals(ip)) {
-            status.setText("WiFi未连接\\n网络摄像头端口: 8080");
+            status.setText("WiFi未连接\n网络摄像头端口: 8080");
         } else {
-            status.setText("网络摄像头\\nhttp://" + ip + ":8080/");
+            status.setText("网络摄像头\nhttp://" + ip + ":8080/");
         }
     }
 
@@ -247,14 +253,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // HTTP 服务和摄像头是两个独立服务，先明确显示 HTTP 状态。
         String ip = NetworkUtil.getWifiIp(this);
         String network = (ip == null || "0.0.0.0".equals(ip))
-                ? "HTTP服务: 8080 OK\\nWiFi未连接"
-                : "HTTP服务: 8080 OK\\nhttp://" + ip + ":8080/";
-        status.setText(network + "\\n摄像头: 正在启动...");
+                ? "HTTP服务: 8080 OK\nWiFi未连接"
+                : "HTTP服务: 8080 OK\nhttp://" + ip + ":8080/";
+        status.setText(network + "\n摄像头: 正在启动...");
 
         try {
             camera = Camera.open();
         } catch (Exception e) {
-            status.setText(network + "\\n摄像头: Camera.open 失败\\n"
+            status.setText(network + "\n摄像头: Camera.open 失败\n"
                     + formatException(e));
             releaseCamera();
             return;
@@ -264,7 +270,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         try {
             params = camera.getParameters();
         } catch (Exception e) {
-            status.setText(network + "\\n摄像头: getParameters 失败\\n"
+            status.setText(network + "\n摄像头: getParameters 失败\n"
                     + formatException(e));
             releaseCamera();
             return;
@@ -275,7 +281,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             if (size == null) throw new IOException("没有可用的预览分辨率");
             params.setPreviewSize(size.width, size.height);
         } catch (Exception e) {
-            status.setText(network + "\\n摄像头: 设置分辨率失败\\n"
+            status.setText(network + "\n摄像头: 设置分辨率失败\n"
                     + formatException(e));
             releaseCamera();
             return;
@@ -287,7 +293,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             setFps(params, fps);
             setZoom(params, zoom);
         } catch (Exception e) {
-            status.setText(network + "\\n摄像头: 设置参数失败\\n"
+            status.setText(network + "\n摄像头: 设置参数失败\n"
                     + formatException(e));
             releaseCamera();
             return;
@@ -296,7 +302,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         try {
             camera.setParameters(params);
         } catch (Exception e) {
-            status.setText(network + "\\n摄像头: camera.setParameters 失败\\n"
+            status.setText(network + "\n摄像头: camera.setParameters 失败\n"
                     + formatException(e));
             releaseCamera();
             return;
@@ -306,7 +312,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             camera.setPreviewDisplay(holder);
             camera.setDisplayOrientation(0);
         } catch (Exception e) {
-            status.setText(network + "\\n摄像头: 绑定预览画面失败\\n"
+            status.setText(network + "\n摄像头: 绑定预览画面失败\n"
                     + formatException(e));
             releaseCamera();
             return;
@@ -329,7 +335,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         try {
             camera.startPreview();
         } catch (Exception e) {
-            status.setText(network + "\\n摄像头: camera.startPreview 失败\\n"
+            status.setText(network + "\n摄像头: camera.startPreview 失败\n"
                     + formatException(e));
             releaseCamera();
             return;
@@ -337,12 +343,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
         try {
             Camera.Size actual = camera.getParameters().getPreviewSize();
-            status.setText(network + "\\n摄像头: OK\\n"
+            status.setText(network + "\n摄像头: OK\n"
                     + actual.width + "x" + actual.height + "  "
                     + getFpsText(camera.getParameters()) + "  "
                     + getZoomText(camera.getParameters()));
         } catch (Exception e) {
-            status.setText(network + "\\n摄像头: 已启动（读取实际参数失败）\\n"
+            status.setText(network + "\n摄像头: 已启动（读取实际参数失败）\n"
                     + formatException(e));
         }
     }
