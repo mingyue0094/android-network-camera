@@ -38,6 +38,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         holder = surfaceView.getHolder();
         holder.addCallback(this);
         server = new MjpegServer();
+        server.setAuthPassword(prefs.getString("web_password", ""));
         server.setConfigHandler(new MjpegServer.ConfigHandler() {
             @Override public String getStatusJson() { return getWebStatusJson(); }
             @Override public String applyConfig(String resolution, int fps, float zoom) {
@@ -96,9 +97,30 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         row.addView(apply);
         panel.addView(row);
 
+        LinearLayout authRow = new LinearLayout(this);
+        final EditText password = new EditText(this);
+        password.setHint("网页访问密码（留空关闭密码）");
+        password.setSingleLine(true);
+        password.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        password.setText(prefs.getString("web_password", ""));
+        Button authApply = new Button(this);
+        authApply.setText("保存密码");
+        authRow.addView(password, new LinearLayout.LayoutParams(0, -2, 1));
+        authRow.addView(authApply);
+        panel.addView(authRow);
+
         FrameLayout.LayoutParams pp = new FrameLayout.LayoutParams(-2, -2);
         pp.leftMargin = 15; pp.topMargin = 15;
         root.addView(panel, pp);
+
+        authApply.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                String value = password.getText().toString();
+                prefs.edit().putString("web_password", value).apply();
+                if (server != null) server.setAuthPassword(value);
+                Toast.makeText(MainActivity.this, value.length() == 0 ? "网页密码已关闭" : "网页密码已保存，用户名：admin", Toast.LENGTH_SHORT).show();
+            }
+        });
 
         apply.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
