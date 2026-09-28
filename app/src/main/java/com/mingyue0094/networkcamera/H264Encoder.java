@@ -5,208 +5,155 @@ import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
 import android.media.MediaFormat;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.List;
 
-public final class H264Encoder {
-    public interface Listener {
-        void onCodecReady(String name, int colorFormat);
-        void onConfig(byte[] sps, byte[] pps);
-        void onFrame(byte[] sample, long ptsUs, boolean key);
+final class H264Encoder {
+    interface Listener {
+        void onFormat(int width, int height, int fps, byte[] csd0, byte[] csd1);
+        void onFrame(byte[] data, long ptsUs, boolean keyFrame);
         void onError(String message);
     }
 
-    private final Object lock=new Object();
-    private final Listener listener;
     private MediaCodec codec;
-    private ByteBuffer[] inputs, outputs;
+    private ByteBuffer[] inputBuffers;
+    private ByteBuffer[] outputBuffers;
     private Thread thread;
     private volatile boolean running;
-    private byte[] latest;
-    private int width,height,fps,colorFormat;
-    private String codecName="";
-    private long frameIndex;
-    private byte[] sps,pps;
+    private Listener listener;
+    private int width, height, fps, bitrate, colorFormat;
+    private long lastQueuedUs;
 
-    public H264Encoder(Listener l){listener=l;}
-
-    public void start(int w,int h,int f,int bitrateKbps,int iframeSeconds)throws Exception{
+    void start(int width, int height, int fps, int bitrate, Listener listener) throws Exception {
         stop();
-        width=w;height=h;fps=Math.max(1,f);
-        MediaCodecInfo info=findEncoder();
-        if(info==null)throw new Exception("没有找到 H.264 硬件编码器");
-        codecName=info.getName();
-        MediaCodecInfo.CodecCapabilities caps=info.getCapabilitiesForType("video/avc");
-        colorFormat=chooseFormat(caps.colorFormats);
-        if(colorFormat==0)throw new Exception("H.264编码器没有YUV420输入格式");
-        MediaFormat mf=MediaFormat.createVideoFormat("video/avc",w,h);
-        mf.setInteger(MediaFormat.KEY_COLOR_FORMAT,colorFormat);
-        mf.setInteger(MediaFormat.KEY_BIT_RATE,Math.max(128000,bitrateKbps*1000));
-        mf.setInteger(MediaFormat.KEY_FRAME_RATE,fps);
-        mf.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL,Math.max(1,iframeSeconds));
-        codec=MediaCodec.createByCodecName(codecName);
-        codec.configure(mf,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE);
+        this.width = width; this.height = height; this.fps = Math.max(1, fps);
+        this.bitrate = bitrate; this.listener = listener;
+        MediaCodecInfo info = findEncoder();
+        if (info == null) throw new IllegalStateException("没有找到 H.264 硬件编码器");
+        MediaCodecInfo.CodecCapabilities caps = info.getCapabilitiesForType("video/avc");
+        colorFormat = chooseColorFormat(caps);
+        if (colorFormat == 0) throw new IllegalStateException("H.264 编码器没有可用的 YUV420 输入格式");
+        codec = MediaCodec.createByCodecName(info.getName());
+        MediaFormat f = MediaFormat.createVideoFormat("video/avc", width, height);
+        f.setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat);
+        f.setInteger(MediaFormat.KEY_BIT_RATE, bitrate);
+        f.setInteger(MediaFormat.KEY_FRAME_RATE, this.fps);
+        f.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
+        codec.configure(f, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         codec.start();
-        inputs=codec.getInputBuffers();
-        outputs=codec.getOutputBuffers();
-        frameIndex=0;sps=null;pps=null;running=true;
-        if(listener!=null)listener.onCodecReady(codecName,colorFormat);
-        thread=new Thread(new Runnable(){public void run(){loop();}},"h264-encoder");
-        thread.setDaemon(true);thread.start();
+        inputBuffers = codec.getInputBuffers();
+        outputBuffers = codec.getOutputBuffers();
+        running = true;
+        thread = new Thread(new Runnable() { @Override public void run() { encodeLoop(); } }, "h264-encoder");
+        thread.setDaemon(true);
+        thread.start();
     }
 
-    public void offer(byte[] nv21){
-        if(!running||nv21==null)return;
-        synchronized(lock){latest=nv21.clone();lock.notifyAll();}
+    void stop() {
+        running = false;
+        if (thread != null) { try { thread.interrupt(); } catch (Exception ignored) {} thread = null; }
+        if (codec != null) {
+            try { codec.stop(); } catch (Exception ignored) {}
+            try { codec.release(); } catch (Exception ignored) {}
+            codec = null;
+        }
+        inputBuffers = null; outputBuffers = null; lastQueuedUs = 0;
     }
 
-    private void loop(){
-        final long interval=1000000L/Math.max(1,fps);
-        while(running){
-            byte[] frame;
-            synchronized(lock){
-                while(running&&latest==null)try{lock.wait(200);}catch(InterruptedException ignored){}
-                if(!running)return;
-                frame=latest;latest=null;
+    void queueNv21(byte[] nv21, int w, int h, long ptsUs) {
+        if (!running || codec == null || nv21 == null || w != width || h != height) return;
+        long interval = 1000000L / Math.max(1, fps);
+        if (lastQueuedUs != 0 && ptsUs - lastQueuedUs < interval * 8 / 10) return;
+        try {
+            int index = codec.dequeueInputBuffer(0);
+            if (index < 0) return;
+            ByteBuffer in = inputBuffers[index];
+            in.clear();
+            int needed = width * height * 3 / 2;
+            if (in.capacity() < needed) return;
+            if (colorFormat == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar
+                    || colorFormat == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420PackedPlanar) {
+                nv21ToI420(nv21, in, width, height);
+            } else {
+                nv21ToNV12(nv21, in, width, height);
             }
-            try{
-                int i=codec.dequeueInputBuffer(10000);
-                if(i>=0){
-                    ByteBuffer b=inputs[i];b.clear();
-                    int need=width*height*3/2;
-                    if(b.capacity()<need)throw new Exception("编码器输入缓冲区不足");
-                    putYuv420(b,frame);
-                    codec.queueInputBuffer(i,0,need,frameIndex*interval,0);
-                    frameIndex++;
+            codec.queueInputBuffer(index, 0, needed, ptsUs, 0);
+            lastQueuedUs = ptsUs;
+        } catch (Exception ex) {
+            if (listener != null) listener.onError("编码输入失败: " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+        }
+    }
+
+    private void encodeLoop() {
+        MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+        while (running && codec != null) {
+            try {
+                int index = codec.dequeueOutputBuffer(info, 10000);
+                if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    MediaFormat f = codec.getOutputFormat();
+                    byte[] csd0 = readBuffer(f.getByteBuffer("csd-0"));
+                    byte[] csd1 = readBuffer(f.getByteBuffer("csd-1"));
+                    if (listener != null) listener.onFormat(width, height, fps, csd0, csd1);
+                } else if (index == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
+                    outputBuffers = codec.getOutputBuffers();
+                } else if (index >= 0) {
+                    ByteBuffer out = outputBuffers[index];
+                    if (out != null && info.size > 0 && (info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
+                        out.position(info.offset);
+                        out.limit(info.offset + info.size);
+                        byte[] data = new byte[info.size];
+                        out.get(data);
+                        boolean key = (info.flags & MediaCodec.BUFFER_FLAG_SYNC_FRAME) != 0;
+                        if (listener != null) listener.onFrame(data, info.presentationTimeUs, key);
+                    }
+                    codec.releaseOutputBuffer(index);
                 }
-                drain();
-            }catch(Exception e){
-                if(listener!=null)listener.onError("H.264编码失败: "+e.getClass().getSimpleName()+": "+e.getMessage());
-                running=false;
+            } catch (Exception ex) {
+                if (running && listener != null)
+                    listener.onError("编码输出失败: " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
             }
         }
     }
 
-    private void drain()throws Exception{
-        MediaCodec.BufferInfo bi=new MediaCodec.BufferInfo();
-        while(running){
-            int i=codec.dequeueOutputBuffer(bi,0);
-            if(i==MediaCodec.INFO_TRY_AGAIN_LATER)return;
-            if(i==MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED){outputs=codec.getOutputBuffers();continue;}
-            if(i==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){
-                MediaFormat f=codec.getOutputFormat();
-                byte[] a=csd(f,"csd-0"),b=csd(f,"csd-1");
-                if(a!=null&&b!=null)setConfig(a,b);
-                continue;
-            }
-            if(i<0)continue;
-            ByteBuffer out=outputs[i];
-            if(bi.size>0){
-                byte[] raw=new byte[bi.size];
-                int pos=out.position(),lim=out.limit();
-                out.position(bi.offset);out.limit(bi.offset+bi.size);out.get(raw);
-                out.position(pos);out.limit(lim);
-                if((bi.flags&MediaCodec.BUFFER_FLAG_CODEC_CONFIG)!=0)extractConfig(raw);
-                else if(listener!=null)listener.onFrame(toAvcc(raw),bi.presentationTimeUs,
-                        (bi.flags&MediaCodec.BUFFER_FLAG_SYNC_FRAME)!=0);
-            }
-            codec.releaseOutputBuffer(i,false);
-        }
-    }
-
-    private byte[] csd(MediaFormat f,String key){
-        try{
-            ByteBuffer b=f.getByteBuffer(key);if(b==null)return null;
-            byte[] v=new byte[b.remaining()];b.duplicate().get(v);
-            List<byte[]> nals=split(v);
-            if(nals.size()==1)return nals.get(0);
-            for(byte[] n:nals)if(n.length>0&&((n[0]&31)==("csd-0".equals(key)?7:8)))return n;
-        }catch(Exception ignored){}
-        return null;
-    }
-
-    private void setConfig(byte[] a,byte[] b){
-        a=strip(a);b=strip(b);
-        if(a!=null&&(a[0]&31)==7)sps=a;
-        if(b!=null&&(b[0]&31)==8)pps=b;
-        if(sps!=null&&pps!=null&&listener!=null)listener.onConfig(sps.clone(),pps.clone());
-    }
-
-    private void extractConfig(byte[] raw){
-        for(byte[] n:split(raw)){
-            if(n.length==0)continue;
-            int t=n[0]&31;if(t==7)sps=n;else if(t==8)pps=n;
-        }
-        if(sps!=null&&pps!=null&&listener!=null)listener.onConfig(sps.clone(),pps.clone());
-    }
-
-    private byte[] toAvcc(byte[] raw){
-        List<byte[]> ns=split(raw);
-        if(ns.isEmpty())return raw;
-        int n=0;for(byte[] x:ns)n+=4+x.length;
-        ByteBuffer b=ByteBuffer.allocate(n);
-        for(byte[] x:ns){b.putInt(x.length);b.put(x);}
-        return b.array();
-    }
-
-    private List<byte[]> split(byte[] d){
-        ArrayList<byte[]> r=new ArrayList<byte[]>();int start=-1;
-        for(int i=0;i+3<d.length;i++){
-            int sc=0;
-            if(d[i]==0&&d[i+1]==0&&d[i+2]==1)sc=3;
-            else if(i+4<=d.length&&d[i]==0&&d[i+1]==0&&d[i+2]==0&&d[i+3]==1)sc=4;
-            if(sc>0){
-                if(start>=0){int e=i;while(e>start&&d[e-1]==0)e--;r.add(copy(d,start,e-start));}
-                start=i+sc;i+=sc-1;
-            }
-        }
-        if(start>=0&&start<d.length){int e=d.length;while(e>start&&d[e-1]==0)e--;r.add(copy(d,start,e-start));}
-        return r;
-    }
-
-    private byte[] copy(byte[] d,int p,int n){byte[] x=new byte[n];System.arraycopy(d,p,x,0,n);return x;}
-    private byte[] strip(byte[] x){
-        if(x==null)return null;int p=0;
-        if(x.length>=4&&x[0]==0&&x[1]==0&&x[2]==0&&x[3]==1)p=4;
-        else if(x.length>=3&&x[0]==0&&x[1]==0&&x[2]==1)p=3;
-        if(p==0)return x;return copy(x,p,x.length-p);
-    }
-
-    private void putYuv420(ByteBuffer dst,byte[] nv21){
-        int y=width*height;dst.put(nv21,0,y);
-        if(colorFormat==21||colorFormat==39||colorFormat==2141391872){
-            for(int i=y;i<y+y/2;i+=2){dst.put(nv21[i+1]);dst.put(nv21[i]);}
-        }else{
-            int c=y/4;
-            for(int i=0;i<c;i++)dst.put(nv21[y+i*2+1]);
-            for(int i=0;i<c;i++)dst.put(nv21[y+i*2]);
-        }
-    }
-
-    private int chooseFormat(int[] fs){
-        int[] p={21,39,19,20,2141391872};
-        for(int x:p)for(int f:fs)if(f==x)return x;return 0;
-    }
-
-    private MediaCodecInfo findEncoder(){
-        for(int i=0;i<MediaCodecList.getCodecCount();i++){
-            MediaCodecInfo x=MediaCodecList.getCodecInfoAt(i);
-            if(!x.isEncoder())continue;
-            boolean avc=false;
-            for(String t:x.getSupportedTypes())if("video/avc".equalsIgnoreCase(t)){avc=true;break;}
-            if(!avc)continue;
-            String n=x.getName();
-            if(!n.startsWith("OMX.google.") && !n.startsWith("c2.android."))return x;
+    private static MediaCodecInfo findEncoder() {
+        int count = MediaCodecList.getCodecCount();
+        for (int i = 0; i < count; i++) {
+            try {
+                MediaCodecInfo info = MediaCodecList.getCodecInfoAt(i);
+                if (!info.isEncoder()) continue;
+                for (String type : info.getSupportedTypes())
+                    if ("video/avc".equalsIgnoreCase(type)) return info;
+            } catch (Exception ignored) {}
         }
         return null;
     }
 
-    public String getCodecName(){return codecName;}
+    private static int chooseColorFormat(MediaCodecInfo.CodecCapabilities caps) {
+        int fallback = 0;
+        for (int f : caps.colorFormats) {
+            if (f == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
+                    || f == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420PackedSemiPlanar
+                    || f == MediaCodecInfo.CodecCapabilities.COLOR_QCOM_FormatYUV420SemiPlanar) return f;
+            if (f == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar
+                    || f == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420PackedPlanar) fallback = f;
+        }
+        return fallback;
+    }
 
-    public void stop(){
-        running=false;synchronized(lock){latest=null;lock.notifyAll();}
-        if(thread!=null){try{thread.interrupt();}catch(Exception ignored){}thread=null;}
-        if(codec!=null){try{codec.stop();}catch(Exception ignored){}try{codec.release();}catch(Exception ignored){}codec=null;}
-        inputs=null;outputs=null;
+    private static byte[] readBuffer(ByteBuffer b) {
+        if (b == null) return null;
+        ByteBuffer x = b.duplicate();
+        byte[] r = new byte[x.remaining()]; x.get(r); return r;
+    }
+
+    private static void nv21ToNV12(byte[] src, ByteBuffer dst, int w, int h) {
+        int y = w * h;
+        dst.put(src, 0, y);
+        for (int i = y; i < y + y / 2; i += 2) { dst.put(src[i + 1]); dst.put(src[i]); }
+    }
+
+    private static void nv21ToI420(byte[] src, ByteBuffer dst, int w, int h) {
+        int y = w * h;
+        dst.put(src, 0, y);
+        for (int i = y; i < y + y / 2; i += 2) dst.put(src[i + 1]);
+        for (int i = y; i < y + y / 2; i += 2) dst.put(src[i]);
     }
 }
