@@ -121,7 +121,7 @@ public class MjpegServer {
         }
 
         private void sendUnauthorized(OutputStream out) throws IOException {
-            String h = "HTTP/1.0 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"Android Network Camera\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            String h = "HTTP/1.0 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"Android Network Camera\"\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET,POST,OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
             out.write(h.getBytes("ISO-8859-1"));
             out.flush();
         }
@@ -185,7 +185,7 @@ public class MjpegServer {
 
         private void sendJson(OutputStream out, String json) throws IOException {
             byte[] data = json.getBytes("UTF-8");
-            String h = "HTTP/1.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: " + data.length + "\r\nConnection: close\r\n\r\n";
+            String h = "HTTP/1.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET,POST,OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nContent-Length: " + data.length + "\r\nConnection: close\r\n\r\n";
             out.write(h.getBytes("ISO-8859-1"));
             out.write(data);
             out.flush();
@@ -193,14 +193,20 @@ public class MjpegServer {
 
         private void sendHtml(OutputStream out) throws IOException {
             byte[] data = HTML.getBytes("UTF-8");
-            String h = "HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: " + data.length + "\r\nConnection: close\r\n\r\n";
+            String h = "HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET,POST,OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nContent-Length: " + data.length + "\r\nConnection: close\r\n\r\n";
             out.write(h.getBytes("ISO-8859-1"));
             out.write(data);
             out.flush();
         }
 
+        private void sendCorsPreflight(OutputStream out) throws IOException {
+            String h = "HTTP/1.0 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET,POST,OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nAccess-Control-Max-Age: 600\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            out.write(h.getBytes("ISO-8859-1"));
+            out.flush();
+        }
+
         private void sendMjpeg(OutputStream out) throws Exception {
-            String h = "HTTP/1.0 200 OK\r\nCache-Control: no-cache, no-store, must-revalidate\r\nPragma: no-cache\r\nConnection: close\r\nContent-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
+            String h = "HTTP/1.0 200 OK\r\nCache-Control: no-cache, no-store, must-revalidate\r\nPragma: no-cache\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET,POST,OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nConnection: close\r\nContent-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
             out.write(h.getBytes("ISO-8859-1"));
             out.flush();
             while (running && !socket.isClosed()) {
