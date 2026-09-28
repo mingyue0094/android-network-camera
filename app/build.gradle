@@ -1,0 +1,14 @@
+apply plugin: 'com.android.application'
+
+android {
+    compileSdkVersion 30
+
+    defaultConfig {
+        applicationId "com.mingyue0094.networkcamera"
+        minSdkVersion 16
+        targetSdkVersion 16
+        versionCode 1
+        versionName "1.0"
+    }
+}
+
