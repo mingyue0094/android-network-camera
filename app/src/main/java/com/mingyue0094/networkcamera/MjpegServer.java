@@ -217,7 +217,7 @@ public class MjpegServer {
                 out.write(frame);
                 out.write("\r\n".getBytes("ISO-8859-1"));
                 out.flush();
-                Thread.sleep(80);
+                Thread.sleep(20);
             }
         }
 
