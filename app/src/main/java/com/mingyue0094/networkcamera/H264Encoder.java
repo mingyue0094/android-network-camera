@@ -104,7 +104,7 @@ final class H264Encoder {
                         boolean key = (info.flags & MediaCodec.BUFFER_FLAG_SYNC_FRAME) != 0;
                         if (listener != null) listener.onFrame(data, info.presentationTimeUs, key);
                     }
-                    codec.releaseOutputBuffer(index);
+                    codec.releaseOutputBuffer(index, false);
                 }
             } catch (Exception ex) {
                 if (running && listener != null)
