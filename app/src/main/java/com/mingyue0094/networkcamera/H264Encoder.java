@@ -174,7 +174,7 @@ public final class H264Encoder {
 
     private void putYuv420(ByteBuffer dst,byte[] nv21){
         int y=width*height;dst.put(nv21,0,y);
-        if(colorFormat==21||colorFormat==39){
+        if(colorFormat==21||colorFormat==39||colorFormat==2141391872){
             for(int i=y;i<y+y/2;i+=2){dst.put(nv21[i+1]);dst.put(nv21[i]);}
         }else{
             int c=y/4;
@@ -184,17 +184,23 @@ public final class H264Encoder {
     }
 
     private int chooseFormat(int[] fs){
-        int[] p={21,39,19,20};
+        int[] p={21,39,19,20,2141391872};
         for(int x:p)for(int f:fs)if(f==x)return x;return 0;
     }
 
     private MediaCodecInfo findEncoder(){
+        MediaCodecInfo fallback=null;
         for(int i=0;i<MediaCodecList.getCodecCount();i++){
             MediaCodecInfo x=MediaCodecList.getCodecInfoAt(i);
             if(!x.isEncoder())continue;
-            for(String t:x.getSupportedTypes())if("video/avc".equalsIgnoreCase(t))return x;
+            boolean avc=false;
+            for(String t:x.getSupportedTypes())if("video/avc".equalsIgnoreCase(t)){avc=true;break;}
+            if(!avc)continue;
+            String n=x.getName();
+            if(!n.startsWith("OMX.google.") && !n.startsWith("c2.android."))return x;
+            if(fallback==null)fallback=x;
         }
-        return null;
+        return fallback;
     }
 
     public String getCodecName(){return codecName;}
