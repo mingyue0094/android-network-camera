@@ -35,7 +35,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private int latestFrameWidth;
     private int latestFrameHeight;
     private volatile boolean encoderRunning;
-    private Thread encoderThread;\n    private H264Encoder h264Encoder;\n    private RtspServer rtspServer;
+    private Thread encoderThread;
+    private H264Encoder h264Encoder;
+    private RtspServer rtspServer;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -45,7 +47,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         setContentView(createView());
         holder = surfaceView.getHolder();
         holder.addCallback(this);
-        server = new MjpegServer();\n        rtspServer = new RtspServer();
+        server = new MjpegServer();
+        rtspServer = new RtspServer();
         server.setAuthPassword(prefs.getString("web_password", ""));
         server.setConfigHandler(new MjpegServer.ConfigHandler() {
             @Override public String getStatusJson() { return getWebStatusJson(); }
@@ -519,7 +522,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             wifiReceiver = null;
         }
         releaseCamera();
-        if (server != null) { server.stop(); server = null; }\n        if (rtspServer != null) { rtspServer.stop(); rtspServer = null; }
+        if (server != null) { server.stop(); server = null; }
+        if (rtspServer != null) { rtspServer.stop(); rtspServer = null; }
         super.onDestroy();
     }
 
