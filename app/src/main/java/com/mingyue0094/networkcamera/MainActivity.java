@@ -44,7 +44,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private void startCamera2()throws Exception{
         encoder=new H264Encoder(new H264Encoder.Listener(){
             public void onCodecReady(String n){show("硬件H.264: "+n);}
-            public void onConfig(byte[] s,byte[] p){muxer=new Fmp4Muxer(width,height,fps);muxer.setConfig(s,p);server.setInitSegment(muxer.getFullInitSegment());if(rtsp!=null)rtsp.onConfig(s,p);}
+            public void onConfig(byte[] s,byte[] p){muxer=new Fmp4Muxer(width,height,fps);muxer.setConfig(s,p);server.setCodec(codecString(s));server.setInitSegment(muxer.getFullInitSegment());if(rtsp!=null)rtsp.onConfig(s,p);}
             public void onFrame(byte[] d,long t,boolean k){if(muxer!=null&&server!=null)server.publish(muxer.makeFragment(d,t,k));if(rtsp!=null)rtsp.onFrame(d,t,k);}
             public void onError(String m){show(m);}
         });
@@ -70,7 +70,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         legacyEncoder.start(width,height,fps,bitrate,1);
         legacyCamera.start();
     }
-    private void applyZoom(){if(camera!=null)camera.setZoom(zoom);if(legacyCamera!=null)legacyCamera.setZoom(zoom);}
+    private String codecString(byte[] s){\n        if(s!=null&&s.length>=4)return String.format(java.util.Locale.US,"avc1.%02x%02x%02x",s[1]&255,s[2]&255,s[3]&255);\n        return "avc1.42001e";\n    }\n    private void applyZoom(){if(camera!=null)camera.setZoom(zoom);if(legacyCamera!=null)legacyCamera.setZoom(zoom);}
     private void applyExposure(){if(camera!=null)camera.setExposure(ev);if(legacyCamera!=null)legacyCamera.setExposure(ev);}
     private void show(String x){
         runOnUiThread(()->{String ip=NetworkUtil.getWifiIp(this);
