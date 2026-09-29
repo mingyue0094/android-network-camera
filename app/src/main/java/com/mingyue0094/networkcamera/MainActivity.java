@@ -35,7 +35,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private int latestFrameWidth;
     private int latestFrameHeight;
     private volatile boolean encoderRunning;
-    private Thread encoderThread;
+    private Thread encoderThread;\n    private H264Encoder h264Encoder;\n    private RtspServer rtspServer;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -45,7 +45,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         setContentView(createView());
         holder = surfaceView.getHolder();
         holder.addCallback(this);
-        server = new MjpegServer();
+        server = new MjpegServer();\n        rtspServer = new RtspServer();
         server.setAuthPassword(prefs.getString("web_password", ""));
         server.setConfigHandler(new MjpegServer.ConfigHandler() {
             @Override public String getStatusJson() { return getWebStatusJson(); }
@@ -375,39 +375,47 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
     private void startEncoder(final int width, final int height) {
         stopEncoder();
-        encoderRunning = true;
-        synchronized (frameLock) {
-            latestNv21 = null;
-            latestFrameWidth = width;
-            latestFrameHeight = height;
-        }
-        encoderThread = new Thread(new Runnable() {
-            @Override public void run() {
-                while (encoderRunning) {
-                    byte[] data;
-                    int w;
-                    int h;
-                    synchronized (frameLock) {
-                        while (encoderRunning && latestNv21 == null) {
-                            try { frameLock.wait(200); } catch (InterruptedException ignored) {}
+        try {
+            rtspServer.setVideoFormat(width, height, targetFps);
+            h264Encoder = new H264Encoder(new H264Encoder.Listener() {
+                @Override public void onCodecReady(String name, int colorFormat) {
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            updateNetworkStatus();
                         }
-                        if (!encoderRunning) return;
-                        data = latestNv21;
-                        w = latestFrameWidth;
-                        h = latestFrameHeight;
-                        latestNv21 = null;
-                    }
-                    try {
-                        android.graphics.YuvImage yuv = new android.graphics.YuvImage(data, ImageFormat.NV21, w, h, null);
-                        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-                        yuv.compressToJpeg(new android.graphics.Rect(0, 0, w, h), 70, baos);
-                        if (server != null) server.updateFrame(baos.toByteArray());
-                    } catch (Exception ignored) {}
+                    });
                 }
-            }
-        }, "jpeg-encoder");
-        encoderThread.setDaemon(true);
-        encoderThread.start();
+
+                @Override public void onConfig(byte[] sps, byte[] pps) {
+                    rtspServer.onConfig(sps, pps);
+                }
+
+                @Override public void onFrame(byte[] sample, long ptsUs, boolean key) {
+                    rtspServer.onFrame(sample, ptsUs, key);
+                }
+
+                @Override public void onError(final String message) {
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            status.setText("RTSP/H.264: " + message);
+                        }
+                    });
+                }
+            });
+            h264Encoder.start(width, height, targetFps, bitrateFor(width, height), 2);
+        } catch (Exception e) {
+            status.setText("H.264编码启动失败: " + formatException(e));
+            h264Encoder = null;
+        }
+    }
+
+    private int bitrateFor(int width, int height) {
+        long pixels = (long) width * height;
+        if (pixels >= 1920L * 1080L) return 6000;
+        if (pixels >= 1280L * 960L) return 4500;
+        if (pixels >= 1280L * 720L) return 3500;
+        if (pixels >= 800L * 600L) return 2200;
+        return 1600;
     }
 
     private void stopEncoder() {
@@ -419,6 +427,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         if (encoderThread != null) {
             try { encoderThread.interrupt(); } catch (Exception ignored) {}
             encoderThread = null;
+        }
+        if (h264Encoder != null) {
+            try { h264Encoder.stop(); } catch (Exception ignored) {}
+            h264Encoder = null;
         }
     }
     private String jsonEscape(String s) {
@@ -507,7 +519,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             wifiReceiver = null;
         }
         releaseCamera();
-        if (server != null) { server.stop(); server = null; }
+        if (server != null) { server.stop(); server = null; }\n        if (rtspServer != null) { rtspServer.stop(); rtspServer = null; }
         super.onDestroy();
     }
 
