@@ -210,13 +210,14 @@ public final class Fmp4Server {
                 + "td,th{border:1px solid #ccc;padding:8px;text-align:left}</style>"
                 + "</head><body>"
                 + "<h1>Android Network Camera</h1>"
-                + "<p>Camera2 + MediaCodec 硬件 H.264 + fMP4 HTTP 摄像头服务。</p>"
+                + "<p>Camera2 + MediaCodec 硬件 H.264 + fMP4 HTTP / RTSP 摄像头服务。</p>"
 
                 + "<h2>API 接口</h2>"
                 + "<table><tr><th>方法</th><th>路径</th><th>说明</th></tr>"
                 + "<tr><td>GET</td><td><code>/help</code></td>"
                 + "<td>显示本 API 使用说明</td></tr>"
-                + "<tr><td>GET</td><td><code>/video.mp4</code></td>"
+                + "<tr><td>RTSP</td><td><code>rtsp://手机IP:8554/camera</code></td><td>H.264 RTP 实时视频流，适合 VLC / FFmpeg / YOLO</td></tr>
+                <tr><td>GET</td><td><code>/video.mp4</code></td>"
                 + "<td>持续输出 fragmented MP4 视频流</td></tr>"
                 + "</table>"
 
@@ -225,13 +226,15 @@ public final class Fmp4Server {
                 + "<p>例如：</p>"
                 + "<pre>http://192.168.1.123:8080/help</pre>"
 
-                + "<h2>2. 获取视频</h2>"
+                + "<h2>2. 获取 RTSP 视频</h2><pre>rtsp://手机IP:8554/camera</pre><p>可直接用于 VLC、FFmpeg、OpenCV/YOLO 等支持 RTSP 的客户端。</p>
+
+                <h2>3. 获取 HTTP fMP4 视频</h2>"
                 + "<pre>GET http://手机IP:8080/video.mp4</pre>"
                 + "<p>例如：</p>"
                 + "<pre>http://192.168.1.123:8080/video.mp4</pre>"
                 + "<p>该接口不是普通一次性 MP4 文件，而是持续输出的 fMP4 视频流。</p>"
 
-                + "<h2>3. 视频参数</h2>"
+                + "<h2>4. 视频参数</h2>"
                 + "<ul>"
                 + "<li>视频编码：H.264 / AVC</li>"
                 + "<li>输入：Camera2 Surface</li>"
@@ -242,27 +245,27 @@ public final class Fmp4Server {
                 + "<li>关键帧间隔：1 秒</li>"
                 + "</ul>"
 
-                + "<h2>4. YOLO / PC 取流</h2>"
+                + "<h2>5. YOLO / PC 取流</h2>"
                 + "<p>PC 端可使用 FFmpeg 读取：</p>"
                 + "<pre>ffmpeg -i http://手机IP:8080/video.mp4 "
                 + "-f rawvideo -pix_fmt bgr24 pipe:1</pre>"
                 + "<p>然后将原始帧送入 OpenCV / YOLO。</p>"
 
-                + "<h2>5. 数据流</h2>"
+                + "<h2>6. 数据流</h2>"
                 + "<pre>Camera2 Surface"
                 + " -> MediaCodec H.264"
                 + " -> fMP4 Muxer"
                 + " -> HTTP :8080"
                 + " -> PC / YOLO</pre>"
 
-                + "<h2>6. 网络要求</h2>"
+                + "<h2>7. 网络要求</h2>"
                 + "<ul>"
                 + "<li>手机和 PC 必须能够互相访问。</li>"
                 + "<li>手机端 HTTP 服务端口为 8080。</li>"
                 + "<li>PC 访问手机的局域网 IP。</li>"
                 + "</ul>"
 
-                + "<h2>7. 当前接口示例</h2>"
+                + "<h2>8. 当前接口示例</h2>"
                 + "<pre>"
                 + "浏览器：\n"
                 + "http://手机IP:8080/help\n\n"
