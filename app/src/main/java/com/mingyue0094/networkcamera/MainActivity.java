@@ -243,9 +243,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private void updateNetworkStatus() {
         String ip = NetworkUtil.getWifiIp(this);
         if (ip == null || "0.0.0.0".equals(ip)) {
-            status.setText("WiFi未连接\n网络摄像头端口: 8080");
+            status.setText("WiFi未连接\nHTTP: 8080\nRTSP: 8554");
         } else {
-            status.setText("网络摄像头\nhttp://" + ip + ":8080/");
+            status.setText("网络摄像头\nhttp://" + ip + ":8080/\nrtsp://" + ip + ":8554/camera");
         }
     }
 
@@ -267,8 +267,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // HTTP 服务和摄像头是两个独立服务，先明确显示 HTTP 状态。
         String ip = NetworkUtil.getWifiIp(this);
         String network = (ip == null || "0.0.0.0".equals(ip))
-                ? "HTTP服务: 8080 OK\nWiFi未连接"
-                : "HTTP服务: 8080 OK\nhttp://" + ip + ":8080/";
+                ? "HTTP: 8080 OK\nRTSP: 8554 OK\nWiFi未连接"
+                : "HTTP: 8080 OK\nRTSP: rtsp://" + ip + ":8554/camera";
         status.setText(network + "\n摄像头: 正在启动...");
 
         try {
