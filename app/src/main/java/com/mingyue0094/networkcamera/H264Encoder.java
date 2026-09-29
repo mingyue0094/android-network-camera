@@ -189,12 +189,18 @@ public final class H264Encoder {
     }
 
     private MediaCodecInfo findEncoder(){
+        MediaCodecInfo fallback=null;
         for(int i=0;i<MediaCodecList.getCodecCount();i++){
             MediaCodecInfo x=MediaCodecList.getCodecInfoAt(i);
             if(!x.isEncoder())continue;
-            for(String t:x.getSupportedTypes())if("video/avc".equalsIgnoreCase(t))return x;
+            boolean avc=false;
+            for(String t:x.getSupportedTypes())if("video/avc".equalsIgnoreCase(t)){avc=true;break;}
+            if(!avc)continue;
+            if(fallback==null)fallback=x;
+            String name=x.getName().toLowerCase(java.util.Locale.US);
+            if(!name.contains("google") && !name.contains("sw") && !name.contains("software"))return x;
         }
-        return null;
+        return fallback;
     }
 
     public String getCodecName(){return codecName;}
