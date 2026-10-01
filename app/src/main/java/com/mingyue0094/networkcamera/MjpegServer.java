@@ -21,6 +21,7 @@ public class MjpegServer {
     public interface ConfigHandler {
         String getStatusJson();
         String applyConfig(String resolution, int fps, float zoom);
+        boolean openSettings();
     }
 
     public void setAuthPassword(String password) {
@@ -82,13 +83,23 @@ public class MjpegServer {
                 }
                 String method = p.length > 0 ? p[0] : "GET";
                 String path = p.length > 1 ? p[1] : "/";
+                int query = path.indexOf('?');
+                if (query >= 0) path = path.substring(0, query);
 
-                if (path.startsWith("/stream")) {
+                if ("OPTIONS".equalsIgnoreCase(method)) {
+                    sendCorsPreflight(out);
+                } else if ("/setings".equals(path) || "/settings".equals(path)) {
+                    ConfigHandler h = configHandler;
+                    boolean ok = h != null && h.openSettings();
+                    sendJson(out, ok
+                            ? "{\"ok\":true,\"action\":\"settings\"}"
+                            : "{\"ok\":false,\"error\":\"settings unavailable\"}");
+                } else if ("/stream".equals(path)) {
                     sendMjpeg(out);
-                } else if (path.startsWith("/api/status")) {
+                } else if ("/api/status".equals(path)) {
                     ConfigHandler h = configHandler;
                     sendJson(out, h == null ? "{\"error\":\"not ready\"}" : h.getStatusJson());
-                } else if ("POST".equals(method) && path.startsWith("/api/config")) {
+                } else if ("POST".equals(method) && "/api/config".equals(path)) {
                     String body = request.substring(request.indexOf("\r\n\r\n") + 4);
                     ConfigHandler h = configHandler;
                     sendJson(out, h == null ? "{\"ok\":false,\"error\":\"not ready\"}" : applyBody(h, body));
@@ -235,6 +246,7 @@ public class MjpegServer {
             "<label>帧率 <select id=\"fps\"><option>5</option><option>10</option><option>15</option><option>20</option><option>24</option><option>25</option><option>30</option></select></label>" +
             "<label>缩放 <select id=\"zoom\"><option>1</option><option>1.5</option><option>2</option><option>3</option><option>4</option><option>6</option><option>8</option></select></label>" +
             "<button onclick=\"applyConfig()\">应用设置</button>" +
+            "<p><a href=\"/setings\" style=\"display:inline-block;margin-top:12px;padding:10px 14px;background:#333;color:#fff;text-decoration:none;border-radius:6px\">打开手机设置（卸载本程序）</a></p>" +
             "</main><script>" +
             "async function loadStatus(){try{let r=await fetch('/api/status');let j=await r.json();" +
             "if(j.resolution)document.getElementById('resolution').value=j.resolution;" +
