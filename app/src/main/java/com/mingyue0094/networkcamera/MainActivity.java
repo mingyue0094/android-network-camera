@@ -12,6 +12,7 @@ import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.hardware.Camera;
 import android.os.Bundle;
+import android.os.BatteryManager;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
@@ -197,6 +198,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         });
     }
 
+    private int getBatteryPercent() {
+        try {
+            Intent intent = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            if (intent == null) return -1;
+            int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+            int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+            if (level < 0 || scale <= 0) return -1;
+            return (level * 100) / scale;
+        } catch (Exception ignored) {
+            return -1;
+        }
+    }
+
     private String getWebStatusJson() {
         Camera.Parameters p = camera == null ? null : camera.getParameters();
         String resolution = "unknown";
@@ -218,7 +232,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 }
             } catch (Exception ignored) {}
         }
-        return "{\"ok\":true,\"resolution\":\"" + resolution + "\",\"fps\":" + fps + ",\"zoom\":" + zoom + "}";
+        int battery = getBatteryPercent();
+        return "{\"ok\":true,\"resolution\":\"" + resolution + "\",\"fps\":" + fps + ",\"zoom\":" + zoom + ",\"battery\":" + battery + "}";
     }
 
     private String applyWebConfig(String resolution, int fps, float zoom) {
