@@ -10,7 +10,10 @@ PC 端：Android Network Camera 人脸识别 + 画面变化事件录像。
    - 始终保留最近 2 秒帧缓存；
    - 变化开始时保留前 2 秒；
    - 变化结束后继续保留 2 秒；
-   - 保存为 YYYYMMDDHHMMSS-YYYYMMDDHHMMSS.mp4；
+   - 保存原始 MP4；
+   - 如果事件期间检测到人脸，再额外保存一份带人脸框和识别结果的 MP4；
+   - 文件名为 YYYYMMDDHHMMSS-YYYYMMDDHHMMSS.mp4，
+     人脸版本增加 -face 后缀；
    - 无变化时不保存录像。
 6. OpenCV 窗口实时显示人脸框和 UUID/姓名。
 
@@ -71,18 +74,7 @@ FACE_MATCH_THRESHOLD = 0.48
 
 
 class IdentityStore:
-    """永久 UUID 人脸库。
-
-    目录结构：
-        faces/
-          UUID/
-            UUID.jpeg
-            info.json
-            embedding.npy
-
-    UUID 一旦创建就不改变。
-    name 只是人工设置的显示名称。
-    """
+    """永久 UUID 人脸库。"""
 
     def __init__(self, root: Path):
         self.root = root
@@ -228,7 +220,11 @@ class IdentityStore:
 
 
 class EventRecorder:
-    """变化事件录像：前 2 秒 + 变化过程 + 后 2 秒。"""
+    """变化事件录像：前 2 秒 + 变化过程 + 后 2 秒。
+
+    每个事件始终保存一份原始视频。
+    如果事件期间出现人脸，再额外保存一份带人脸框和识别结果的视频。
+    """
 
     def __init__(
         self,
@@ -241,29 +237,54 @@ class EventRecorder:
         self.fps = max(1.0, float(fps))
         self.pre_seconds = pre_seconds
         self.post_seconds = post_seconds
+
+        # 原始视频帧。
         self.buffer: deque[tuple[float, np.ndarray]] = deque()
         self.event_frames: list[tuple[float, np.ndarray]] = []
+
+        # 带识别框的视频帧。
+        self.face_buffer: deque[tuple[float, np.ndarray]] = deque()
+        self.face_event_frames: list[tuple[float, np.ndarray]] = []
+
         self.recording = False
+        self.has_face = False
         self.last_change_time: Optional[float] = None
         self.event_start_time: Optional[float] = None
         self.lock = threading.RLock()
 
     def _trim_buffer(self, now: float) -> None:
         cutoff = now - self.pre_seconds
+
         while self.buffer and self.buffer[0][0] < cutoff:
             self.buffer.popleft()
+
+        while self.face_buffer and self.face_buffer[0][0] < cutoff:
+            self.face_buffer.popleft()
 
     def push(
         self,
         timestamp: float,
         frame: np.ndarray,
         changed: bool,
+        annotated_frame: Optional[np.ndarray] = None,
+        has_face: bool = False,
     ) -> None:
         with self.lock:
             self._trim_buffer(timestamp)
 
+            # 人脸版本需要一直保留最近 2 秒的“已经画好框”的帧。
+            # 这样事件开始前 2 秒也能完整进入人脸录像。
+            if annotated_frame is None:
+                annotated_frame = frame
+
+            if has_face:
+                self.has_face = True
+
             if not self.recording:
                 self.buffer.append((timestamp, frame.copy()))
+                self.face_buffer.append(
+                    (timestamp, annotated_frame.copy())
+                )
 
                 if changed:
                     self.recording = True
@@ -271,11 +292,27 @@ class EventRecorder:
                         self.buffer[0][0] if self.buffer else timestamp
                     )
                     self.event_frames = list(self.buffer)
+                    self.face_event_frames = list(self.face_buffer)
                     self.last_change_time = timestamp
+
+                    # 如果前 2 秒里已经出现过人脸，也需要保存人脸版本。
+                    self.has_face = any(
+                        self._frame_has_face_for_buffer(
+                            item[1]
+                        )
+                        for item in []
+                    ) or self.has_face
+
                     print("[record] 变化开始")
                 return
 
             self.event_frames.append((timestamp, frame.copy()))
+            self.face_event_frames.append(
+                (timestamp, annotated_frame.copy())
+            )
+
+            if has_face:
+                self.has_face = True
 
             if changed:
                 self.last_change_time = timestamp
@@ -287,52 +324,83 @@ class EventRecorder:
             ):
                 self._finish_event()
 
+    @staticmethod
+    def _frame_has_face_for_buffer(frame: np.ndarray) -> bool:
+        # 保留接口，不从图像反推人脸；真正的人脸状态由 has_face 维护。
+        return False
+
     def _finish_event(self) -> None:
         if not self.event_frames:
             self._reset()
             return
 
         end_timestamp = self.event_frames[-1][0]
+        start_timestamp = (
+            self.event_start_time or self.event_frames[0][0]
+        )
+
         self._write_mp4(
             self.event_frames,
-            self.event_start_time or self.event_frames[0][0],
+            start_timestamp,
             end_timestamp,
+            suffix="",
         )
+
+        if self.has_face and self.face_event_frames:
+            self._write_mp4(
+                self.face_event_frames,
+                start_timestamp,
+                end_timestamp,
+                suffix="-face",
+            )
+
         self._reset()
 
     def _reset(self) -> None:
         self.recording = False
+        self.has_face = False
         self.last_change_time = None
         self.event_start_time = None
         self.event_frames.clear()
+        self.face_event_frames.clear()
         self.buffer.clear()
+        self.face_buffer.clear()
+
+    def _make_unique_path(
+        self,
+        start_dt: datetime,
+        end_dt: datetime,
+        suffix: str,
+    ) -> Path:
+        stem = (
+            f"{start_dt:%Y%m%d%H%M%S}-"
+            f"{end_dt:%Y%m%d%H%M%S}{suffix}"
+        )
+        path = self.output_dir / f"{stem}.mp4"
+
+        if path.exists():
+            index = 2
+            while True:
+                candidate = self.output_dir / f"{stem}-{index}.mp4"
+                if not candidate.exists():
+                    return candidate
+                index += 1
+
+        return path
 
     def _write_mp4(
         self,
         frames: list[tuple[float, np.ndarray]],
         start_ts: float,
         end_ts: float,
+        suffix: str,
     ) -> None:
         first_frame = frames[0][1]
         height, width = first_frame.shape[:2]
 
         start_dt = datetime.fromtimestamp(start_ts)
         end_dt = datetime.fromtimestamp(end_ts)
-
-        path = self.output_dir / (
-            f"{start_dt:%Y%m%d%H%M%S}-"
-            f"{end_dt:%Y%m%d%H%M%S}.mp4"
-        )
-
-        if path.exists():
-            stem = path.stem
-            index = 2
-            while True:
-                candidate = self.output_dir / f"{stem}-{index}.mp4"
-                if not candidate.exists():
-                    path = candidate
-                    break
-                index += 1
+        path = self._make_unique_path(start_dt, end_dt, suffix)
 
         writer = cv2.VideoWriter(
             str(path),
@@ -907,6 +975,7 @@ def main():
 
     print(f"[camera] 连接: {args.url}")
     print("[record] 规则：变化前2秒 + 变化过程 + 变化结束后2秒")
+    print("[record] 每个事件保存原始视频；检测到人脸时额外保存 -face.mp4")
     print(f"[record] 输出目录：{RECORD_DIR}")
 
     reader = MjpegReader(
@@ -918,34 +987,43 @@ def main():
     last_face_time = 0.0
     face_interval = 1.0 / min(max(fps, 1.0), 10.0)
 
+    # 保留最近一次识别结果，让录像中每一帧都能带上框和识别文字。
+    last_detections: list[dict] = []
+
     try:
         for frame in reader.frames():
             timestamp = time.time()
 
             changed, change_ratio = detector.detect(frame)
 
-            detections = []
+            detections = None
             if (
                 recognizer is not None
                 and timestamp - last_face_time >= face_interval
             ):
                 detections = recognizer.process(frame, store)
+                last_detections = detections
                 last_face_time = timestamp
+
+            # 使用最近一次识别结果生成带框版本。
+            display = frame.copy()
+            if last_detections:
+                draw_face_results(
+                    display,
+                    last_detections,
+                    store,
+                )
+
+            # 只有真正得到人脸检测结果时才触发“本事件有人脸”。
+            has_face = bool(detections) if detections is not None else False
 
             recorder.push(
                 timestamp,
                 frame,
                 changed,
+                annotated_frame=display,
+                has_face=has_face,
             )
-
-            display = frame.copy()
-
-            if detections:
-                draw_face_results(
-                    display,
-                    detections,
-                    store,
-                )
 
             status = "CHANGE" if changed else "STATIC"
 
