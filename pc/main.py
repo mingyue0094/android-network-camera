@@ -244,6 +244,7 @@ class EventRecorder:
 
         # 带识别框的视频帧。
         self.face_buffer: deque[tuple[float, np.ndarray]] = deque()
+        self.face_buffer_flags: deque[tuple[float, bool]] = deque()
         self.face_event_frames: list[tuple[float, np.ndarray]] = []
 
         self.recording = False
@@ -261,6 +262,12 @@ class EventRecorder:
         while self.face_buffer and self.face_buffer[0][0] < cutoff:
             self.face_buffer.popleft()
 
+        while (
+            self.face_buffer_flags
+            and self.face_buffer_flags[0][0] < cutoff
+        ):
+            self.face_buffer_flags.popleft()
+
     def push(
         self,
         timestamp: float,
@@ -277,14 +284,12 @@ class EventRecorder:
             if annotated_frame is None:
                 annotated_frame = frame
 
-            if has_face:
-                self.has_face = True
-
             if not self.recording:
                 self.buffer.append((timestamp, frame.copy()))
                 self.face_buffer.append(
                     (timestamp, annotated_frame.copy())
                 )
+                self.face_buffer_flags.append((timestamp, has_face))
 
                 if changed:
                     self.recording = True
@@ -293,15 +298,10 @@ class EventRecorder:
                     )
                     self.event_frames = list(self.buffer)
                     self.face_event_frames = list(self.face_buffer)
-                    self.last_change_time = timestamp
-
-                    # 如果前 2 秒里已经出现过人脸，也需要保存人脸版本。
                     self.has_face = any(
-                        self._frame_has_face_for_buffer(
-                            item[1]
-                        )
-                        for item in []
-                    ) or self.has_face
+                        flag for _, flag in self.face_buffer_flags
+                    )
+                    self.last_change_time = timestamp
 
                     print("[record] 变化开始")
                 return
@@ -323,11 +323,6 @@ class EventRecorder:
                 and timestamp - self.last_change_time >= self.post_seconds
             ):
                 self._finish_event()
-
-    @staticmethod
-    def _frame_has_face_for_buffer(frame: np.ndarray) -> bool:
-        # 保留接口，不从图像反推人脸；真正的人脸状态由 has_face 维护。
-        return False
 
     def _finish_event(self) -> None:
         if not self.event_frames:
@@ -365,6 +360,7 @@ class EventRecorder:
         self.face_event_frames.clear()
         self.buffer.clear()
         self.face_buffer.clear()
+        self.face_buffer_flags.clear()
 
     def _make_unique_path(
         self,
