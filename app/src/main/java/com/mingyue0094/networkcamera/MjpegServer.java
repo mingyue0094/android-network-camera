@@ -22,6 +22,8 @@ public class MjpegServer {
         String getStatusJson();
         String applyConfig(String resolution, int fps, float zoom);
         boolean openSettings();
+        String setCameraEnabled(boolean enabled);
+        boolean lockScreen();
     }
 
     public void setAuthPassword(String password) {
@@ -83,8 +85,9 @@ public class MjpegServer {
                 }
                 String method = p.length > 0 ? p[0] : "GET";
                 String path = p.length > 1 ? p[1] : "/";
+                String queryString = "";
                 int query = path.indexOf('?');
-                if (query >= 0) path = path.substring(0, query);
+                if (query >= 0) { queryString = path.substring(query + 1); path = path.substring(0, query); }
 
                 if ("OPTIONS".equalsIgnoreCase(method)) {
                     sendCorsPreflight(out);
@@ -99,6 +102,19 @@ public class MjpegServer {
                 } else if ("/api/status".equals(path)) {
                     ConfigHandler h = configHandler;
                     sendJson(out, h == null ? "{\"error\":\"not ready\"}" : h.getStatusJson());
+                } else if ("GET".equalsIgnoreCase(method) && "/api/camera".equals(path)) {
+                    ConfigHandler h = configHandler;
+                    boolean enabled = "1".equals(queryValue(queryString, "enabled"))
+                            || "true".equalsIgnoreCase(queryValue(queryString, "enabled"));
+                    sendJson(out, h == null
+                            ? "{\"ok\":false,\"error\":\"not ready\"}"
+                            : h.setCameraEnabled(enabled));
+                } else if ("GET".equalsIgnoreCase(method) && "/api/lock".equals(path)) {
+                    ConfigHandler h = configHandler;
+                    boolean ok = h != null && h.lockScreen();
+                    sendJson(out, ok
+                            ? "{\"ok\":true,\"action\":\"lock\"}"
+                            : "{\"ok\":false,\"error\":\"lock permission required\"}");
                 } else if ("POST".equals(method) && "/api/config".equals(path)) {
                     String body = request.substring(request.indexOf("\r\n\r\n") + 4);
                     ConfigHandler h = configHandler;
@@ -164,6 +180,16 @@ public class MjpegServer {
                 b.write(v);
             }
             return b.toString("UTF-8");
+        }
+
+        private String queryValue(String query, String key) {
+            if (query == null) return "";
+            String[] items = query.split("&");
+            for (String item : items) {
+                int p = item.indexOf('=');
+                if (p > 0 && key.equals(item.substring(0, p))) return item.substring(p + 1);
+            }
+            return "";
         }
 
         private String applyBody(ConfigHandler h, String body) {
