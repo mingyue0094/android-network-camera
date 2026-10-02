@@ -23,7 +23,7 @@ public class MjpegServer {
         String applyConfig(String resolution, int fps, float zoom, String focus);
         boolean openSettings();
         String setCameraEnabled(boolean enabled);
-        String setBrightness(int percent);
+        String setCameraBrightness(int compensation);
     }
 
     public void setAuthPassword(String password) {
@@ -108,7 +108,7 @@ public class MjpegServer {
                     ConfigHandler h = configHandler;
                     try {
                         int brightness = Integer.parseInt(queryValue(queryString, "value"));
-                        sendJson(out, h == null ? "{\"ok\":false,\"error\":\"not ready\"}" : h.setBrightness(brightness));
+                        sendJson(out, h == null ? "{\"ok\":false,\"error\":\"not ready\"}" : h.setCameraBrightness(brightness));
                     } catch (Exception e) {
                         sendJson(out, "{\"ok\":false,\"error\":\"invalid brightness\"}");
                     }
@@ -277,6 +277,7 @@ public class MjpegServer {
             "<label>帧率 <select id=\"fps\"><option>5</option><option>10</option><option>15</option><option>20</option><option>24</option><option>25</option><option>30</option></select></label>" +
             "<label>缩放 <select id=\"zoom\"><option>1</option><option>1.5</option><option>2</option><option>3</option><option>4</option><option>6</option><option>8</option></select></label>" +
             "<label>对焦 <select id=\"focus\"><option value=\"continuous\">连续自动</option><option value=\"single\">单次自动</option><option value=\"lock\">锁定</option></select></label>" +
+            "<label style=\"display:block\">画面亮度 <input id=\"brightness\" type=\"range\" min=\"0\" max=\"100\" value=\"50\" oninput=\"brightnessInput()\" style=\"width:min(500px,80vw)\"></label>" +
             "<button onclick=\"applyConfig()\">应用设置</button>" +
             "<button id=\"cameraBtn\" onclick=\"toggleCamera()\">关闭摄像头</button>" +
             "<p><a href=\"/setings\" style=\"display:inline-block;margin-top:12px;padding:10px 14px;background:#333;color:#fff;text-decoration:none;border-radius:6px\">打开手机设置（卸载本程序）</a></p>" +
@@ -286,11 +287,11 @@ public class MjpegServer {
             "if(j.fps)document.getElementById('fps').value=j.fps;" +
             "if(j.zoom)document.getElementById('zoom').value=j.zoom;" +
             "if(j.focus)document.getElementById('focus').value=j.focus;" +
-            "if(j.brightness>0)document.getElementById('brightness').value=j.brightness;" +
+            "if(j.brightnessMin!==undefined&&j.brightnessMax>j.brightnessMin){let x=(j.brightness-j.brightnessMin)*100/(j.brightnessMax-j.brightnessMin);document.getElementById('brightness').value=Math.max(0,Math.min(100,Math.round(x)));}" +
             "document.getElementById('msg').textContent='当前：'+j.resolution+' / '+j.fps+' FPS / '+j.zoom+'x / 电量 '+j.battery+'%';" +
             "document.getElementById('cameraBtn').textContent=j.camera===false?'打开摄像头':'关闭摄像头';" +
             "}catch(e){document.getElementById('msg').textContent='状态读取失败';}}" +
-            "let brightnessTimer=null;function brightnessInput(){clearTimeout(brightnessTimer);brightnessTimer=setTimeout(async function(){let v=document.getElementById('brightness').value;try{let r=await fetch('/api/brightness?value='+v);let j=await r.json();document.getElementById('msg').textContent=j.ok?'屏幕亮度：'+v+'%':'亮度设置失败';}catch(e){document.getElementById('msg').textContent='亮度设置失败';}},80);}" +
+            "let brightnessTimer=null;function brightnessInput(){clearTimeout(brightnessTimer);brightnessTimer=setTimeout(async function(){let j=await (await fetch('/api/status')).json();let min=j.brightnessMin,max=j.brightnessMax;if(max<=min)return;let v=Math.round(min+(max-min)*document.getElementById('brightness').value/100);try{let r=await fetch('/api/brightness?value='+v);let x=await r.json();document.getElementById('msg').textContent=x.ok?'画面亮度已调整':'画面亮度设置失败';}catch(e){document.getElementById('msg').textContent='画面亮度设置失败';}},80);}" +
             "async function toggleCamera(){let enabled=document.getElementById('cameraBtn').textContent==='打开摄像头';try{let r=await fetch('/api/camera?enabled='+(enabled?'1':'0'));let j=await r.json();document.getElementById('cameraBtn').textContent=j.camera===false?'打开摄像头':'关闭摄像头';document.getElementById('msg').textContent=j.camera===false?'摄像头已关闭（省电）':'摄像头已打开';}catch(e){document.getElementById('msg').textContent='摄像头控制失败';}}" +            "async function applyConfig(){let b={resolution:document.getElementById('resolution').value," +
             "fps:+document.getElementById('fps').value,zoom:+document.getElementById('zoom').value,focus:document.getElementById('focus').value};" +
             "document.getElementById('msg').textContent='正在应用...';try{" +
