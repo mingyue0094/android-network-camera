@@ -114,7 +114,7 @@ public class MjpegServer {
                     } catch (Exception e) {
                         sendJson(out, "{\"ok\":false,\"error\":\"invalid focus coordinates\"}");
                     }
-                } else if ("GET".equalsIgnoreCase(method) && "/api/brightness".equals(path))
+                } else if ("GET".equalsIgnoreCase(method) && "/api/brightness".equals(path)) {
                     ConfigHandler h = configHandler;
                     try {
                         int brightness = Integer.parseInt(queryValue(queryString, "value"));
