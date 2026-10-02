@@ -110,12 +110,6 @@ public class MjpegServer {
                     sendJson(out, h == null
                             ? "{\"ok\":false,\"error\":\"not ready\"}"
                             : h.setCameraEnabled(enabled));
-                } else if ("GET".equalsIgnoreCase(method) && "/api/lock".equals(path)) {
-                    ConfigHandler h = configHandler;
-                    boolean ok = h != null && h.lockScreen();
-                    sendJson(out, ok
-                            ? "{\"ok\":true,\"action\":\"lock\"}"
-                            : "{\"ok\":false,\"error\":\"lock permission required\"}");
                 } else if ("POST".equals(method) && "/api/config".equals(path)) {
                     String body = request.substring(request.indexOf("\r\n\r\n") + 4);
                     ConfigHandler h = configHandler;
@@ -274,7 +268,6 @@ public class MjpegServer {
             "<label>缩放 <select id=\"zoom\"><option>1</option><option>1.5</option><option>2</option><option>3</option><option>4</option><option>6</option><option>8</option></select></label>" +
             "<button onclick=\"applyConfig()\">应用设置</button>" +
             "<button id=\"cameraBtn\" onclick=\"toggleCamera()\">关闭摄像头</button>" +
-            "<button onclick=\"lockScreen()\">锁屏</button>" +
             "<p><a href=\"/setings\" style=\"display:inline-block;margin-top:12px;padding:10px 14px;background:#333;color:#fff;text-decoration:none;border-radius:6px\">打开手机设置（卸载本程序）</a></p>" +
             "</main><script>" +
             "async function loadStatus(){try{let r=await fetch('/api/status');let j=await r.json();" +
