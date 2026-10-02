@@ -645,6 +645,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
     private void releaseCamera() {
         stopEncoder();
+        if (server != null) server.clearFrame();
         if (camera != null) {
             try { camera.setPreviewCallback(null); } catch (Exception ignored) {}
             try { camera.stopPreview(); } catch (Exception ignored) {}
