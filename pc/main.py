@@ -62,6 +62,8 @@ DEFAULT_YOLO = MODELS_DIR / "yolov8n-face.pt"
 
 PRE_SECONDS = 2.0
 POST_SECONDS = 2.0
+EVENT_IDLE_TIMEOUT = 120.0
+
 
 CHANGE_WIDTH = 320
 CHANGE_HEIGHT = 180
@@ -318,12 +320,35 @@ class EventRecorder:
                 self.last_change_time = timestamp
                 return
 
+            # if (
+            #     self.last_change_time is not None
+            #     and timestamp - self.last_change_time >= self.post_seconds
+            # ):
+            #     self._finish_event()
             if (
-                self.last_change_time is not None
-                and timestamp - self.last_change_time >= self.post_seconds
+                not changed
+                and timestamp - self.last_change_time >= EVENT_IDLE_TIMEOUT
             ):
+                cutoff = self.last_change_time + self.post_seconds
+            
+                self.event_frames = [
+                    item
+                    for item in self.event_frames
+                    if item[0] <= cutoff
+                    or item[0] >= timestamp - self.post_seconds
+                ]
+            
+                self.face_event_frames = [
+                    item
+                    for item in self.face_event_frames
+                    if item[0] <= cutoff
+                    or item[0] >= timestamp - self.post_seconds
+                ]
+            
                 self._finish_event()
-
+   
+   
+   
     def _finish_event(self) -> None:
         if not self.event_frames:
             self._reset()
