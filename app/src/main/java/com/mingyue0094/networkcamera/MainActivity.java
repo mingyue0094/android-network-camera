@@ -62,7 +62,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             }
             @Override public String setCameraEnabled(boolean enabled) {
                 return setCameraEnabledFromWeb(enabled);
-            }        });
+            }
+            @Override public String setBrightness(int percent) {
+                return setBrightnessFromWeb(percent);
+            }
+        });
         try { server.start(); status.setText("网络摄像头启动中..."); }
         catch (IOException e) { status.setText("HTTP 8080 启动失败: " + e.getMessage()); }
         registerWifiReceiver();
@@ -248,6 +252,29 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         return getWebStatusJson();
     }
 
+    private int getScreenBrightness() {
+        try {
+            return android.provider.Settings.System.getInt(getContentResolver(), android.provider.Settings.System.SCREEN_BRIGHTNESS);
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    private String setBrightnessFromWeb(int percent) {
+        if (percent < 1) percent = 1;
+        if (percent > 100) percent = 100;
+        try {
+            int value = Math.round(percent * 255f / 100f);
+            android.provider.Settings.System.putInt(getContentResolver(), android.provider.Settings.System.SCREEN_BRIGHTNESS, value);
+            android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.screenBrightness = value / 255f;
+            getWindow().setAttributes(lp);
+            return getWebStatusJson();
+        } catch (Exception e) {
+            return "{\"ok\":false,\"error\":\"brightness unavailable\"}";
+        }
+    }
+
     private String getWebStatusJson() {
         Camera.Parameters p = camera == null ? null : camera.getParameters();
         String resolution = "unknown";
@@ -270,9 +297,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             } catch (Exception ignored) {}
         }
         int battery = getBatteryPercent();
+        int brightness = getScreenBrightness();
+        int brightnessPercent = brightness < 0 ? -1 : Math.max(1, Math.min(100, Math.round(brightness * 100f / 255f)));
+        String focus = prefs.getString("focus_mode", "continuous");
         return "{\"ok\":true,\"camera\":" + cameraEnabled
                 + ",\"resolution\":\"" + resolution + "\",\"fps\":" + fps
-                + ",\"zoom\":" + zoom + ",\"battery\":" + battery + "}";
+                + ",\"zoom\":" + zoom + ",\"focus\":\"" + focus
+                + "\",\"battery\":" + battery + ",\"brightness\":" + brightnessPercent + "}";
     }
 
     private String applyWebConfig(String resolution, int fps, float zoom, String focus) {
