@@ -294,7 +294,7 @@ public class MjpegServer {
             "</main><script>" +
             "const video=document.getElementById('video');const focusBox=document.getElementById('focusBox');video.addEventListener('click',async function(e){const r=this.getBoundingClientRect();const x=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));const y=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));focusBox.style.left=(x*100)+'%';focusBox.style.top=(y*100)+'%';focusBox.style.display='block';clearTimeout(window.focusBoxTimer);window.focusBoxTimer=setTimeout(function(){focusBox.style.display='none';},1500);try{let j=await (await fetch('/api/focus?x='+x.toFixed(4)+'&y='+y.toFixed(4))).json();document.getElementById('msg').textContent=j.focusOk?'已对焦到点击位置':'对焦失败';}catch(e){document.getElementById('msg').textContent='对焦请求失败';}});" +
             "async function loadStatus(){try{let r=await fetch('/api/status');let j=await r.json();"
-            "if(j.resolution)document.getElementById('resolution').value=j.resolution;" +
+            + "if(j.resolution)document.getElementById('resolution').value=j.resolution;" +
             "if(j.fps)document.getElementById('fps').value=j.fps;" +
             "if(j.zoom)document.getElementById('zoom').value=j.zoom;" +
             "if(j.focus)document.getElementById('focus').value=j.focus;" +
