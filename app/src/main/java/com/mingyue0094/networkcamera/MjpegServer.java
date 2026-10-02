@@ -23,7 +23,6 @@ public class MjpegServer {
         String applyConfig(String resolution, int fps, float zoom);
         boolean openSettings();
         String setCameraEnabled(boolean enabled);
-        boolean lockScreen();
     }
 
     public void setAuthPassword(String password) {
@@ -285,9 +284,7 @@ public class MjpegServer {
             "document.getElementById('msg').textContent='当前：'+j.resolution+' / '+j.fps+' FPS / '+j.zoom+'x / 电量 '+j.battery+'%';" +
             "document.getElementById('cameraBtn').textContent=j.camera===false?'打开摄像头':'关闭摄像头';" +
             "}catch(e){document.getElementById('msg').textContent='状态读取失败';}}" +
-            "async function toggleCamera(){let enabled=document.getElementById('cameraBtn').textContent==='打开摄像头';try{let r=await fetch('/api/camera?enabled='+(enabled?'1':'0'));let j=await r.json();document.getElementById('cameraBtn').textContent=j.camera===false?'打开摄像头':'关闭摄像头';document.getElementById('msg').textContent=j.camera===false?'摄像头已关闭（省电）':'摄像头已打开';}catch(e){document.getElementById('msg').textContent='摄像头控制失败';}}" +
-            "async function lockScreen(){try{let r=await fetch('/api/lock');let j=await r.json();document.getElementById('msg').textContent=j.ok?'已锁屏':'请先在手机上确认锁屏权限';}catch(e){document.getElementById('msg').textContent='锁屏请求失败';}}" +
-            "async function applyConfig(){let b={resolution:document.getElementById('resolution').value," +
+            "async function toggleCamera(){let enabled=document.getElementById('cameraBtn').textContent==='打开摄像头';try{let r=await fetch('/api/camera?enabled='+(enabled?'1':'0'));let j=await r.json();document.getElementById('cameraBtn').textContent=j.camera===false?'打开摄像头':'关闭摄像头';document.getElementById('msg').textContent=j.camera===false?'摄像头已关闭（省电）':'摄像头已打开';}catch(e){document.getElementById('msg').textContent='摄像头控制失败';}}" +            "async function applyConfig(){let b={resolution:document.getElementById('resolution').value," +
             "fps:+document.getElementById('fps').value,zoom:+document.getElementById('zoom').value};" +
             "document.getElementById('msg').textContent='正在应用...';try{" +
             "let r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});" +
