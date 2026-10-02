@@ -539,7 +539,97 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
      * Camera1 不同设备支持的模式不同，不能直接写死 CONTINUOUS_VIDEO。
      * 视频优先使用连续对焦；旧设备若不支持，则退回普通 AUTO。
      */
-    private void setFocusMode(Camera.Parameters p, String wanted) {
+    private void setFps(Camera.Parameters p, int wanted) {
+        try {
+            List<int[]> ranges = p.getSupportedPreviewFpsRange();
+            if (ranges == null || ranges.isEmpty()) return;
+            int target = wanted * 1000;
+            int[] best = ranges.get(0);
+            int bestDiff = Integer.MAX_VALUE;
+            for (int[] r : ranges) {
+                int mid = (r[0] + r[1]) / 2;
+                int diff = Math.abs(mid - target);
+                if (diff < bestDiff) { best = r; bestDiff = diff; }
+            }
+            p.setPreviewFpsRange(best[0], best[1]);
+        } catch (Exception ignored) {}
+    }
+
+    private void setZoom(Camera.Parameters p, float wanted) {
+        try {
+            if (!p.isZoomSupported()) return;
+            List<Integer> ratios = p.getZoomRatios();
+            int max = p.getMaxZoom();
+            if (ratios == null || ratios.isEmpty() || max <= 0) return;
+            int best = 0;
+            int bestDiff = Integer.MAX_VALUE;
+            int target = Math.round(wanted * 100);
+            for (int i = 0; i < ratios.size(); i++) {
+                int diff = Math.abs(ratios.get(i) - target);
+                if (diff < bestDiff) { best = i; bestDiff = diff; }
+            }
+            if (best > max) best = max;
+            p.setZoom(best);
+        } catch (Exception ignored) {}
+    }
+
+    private String getZoomText(Camera.Parameters p) {
+        try {
+            if (!p.isZoomSupported()) return "Zoom不支持";
+            List<Integer> ratios = p.getZoomRatios();
+            int index = p.getZoom();
+            if (ratios != null && index >= 0 && index < ratios.size())
+                return String.format(java.util.Locale.US, "%.1fx", ratios.get(index) / 100.0f);
+        } catch (Exception ignored) {}
+        return targetZoom + "x";
+    }
+
+    private String getFpsText(Camera.Parameters p) {
+        try {
+            int[] r = new int[2];
+            p.getPreviewFpsRange(r);
+            return ((r[1] + 500) / 1000) + " FPS";
+        } catch (Exception e) { return targetFps + " FPS"; }
+    }
+
+    private Camera.Size chooseClosestSize(List<Camera.Size> sizes, int w, int h) {
+        if (sizes == null || sizes.isEmpty()) return null;
+        Camera.Size best = sizes.get(0);
+        long bestScore = Long.MAX_VALUE;
+        for (Camera.Size s : sizes) {
+            long score = Math.abs(s.width - w) * 1000L + Math.abs(s.height - h);
+            if (score < bestScore) { best = s; bestScore = score; }
+        }
+        return best;
+    }
+
+    @Override public void surfaceChanged(SurfaceHolder h, int format, int width, int height) {
+        // Preview configuration is handled when the surface is created.
+    }
+
+    @Override public void surfaceDestroyed(SurfaceHolder h) { releaseCamera(); }
+
+    @Override protected void onDestroy() {
+        if (wifiReceiver != null) {
+            try { unregisterReceiver(wifiReceiver); } catch (Exception ignored) {}
+            wifiReceiver = null;
+        }
+        releaseCamera();
+        if (server != null) { server.stop(); server = null; }
+        super.onDestroy();
+    }
+
+    private void releaseCamera() {
+        stopEncoder();
+        if (server != null) server.clearFrame();
+        if (camera != null) {
+            try { camera.setPreviewCallback(null); } catch (Exception ignored) {}
+            try { camera.stopPreview(); } catch (Exception ignored) {}
+            try { camera.release(); } catch (Exception ignored) {}
+            camera = null;
+        }
+    }
+}    private void setFocusMode(Camera.Parameters p, String wanted) {
         try {
             List<String> modes = p.getSupportedFocusModes();
             if (modes == null || modes.isEmpty()) return;
