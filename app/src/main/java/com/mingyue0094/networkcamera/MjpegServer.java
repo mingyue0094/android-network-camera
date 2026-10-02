@@ -24,6 +24,7 @@ public class MjpegServer {
         boolean openSettings();
         String setCameraEnabled(boolean enabled);
         String setCameraBrightness(int compensation);
+        String focusAt(float x, float y);
     }
 
     public void setAuthPassword(String password) {
@@ -104,7 +105,16 @@ public class MjpegServer {
                 } else if ("/api/status".equals(path)) {
                     ConfigHandler h = configHandler;
                     sendJson(out, h == null ? "{\"error\":\"not ready\"}" : h.getStatusJson());
-                } else if ("GET".equalsIgnoreCase(method) && "/api/brightness".equals(path)) {
+                } else if ("GET".equalsIgnoreCase(method) && "/api/focus".equals(path)) {
+                    ConfigHandler h = configHandler;
+                    try {
+                        float x = Float.parseFloat(queryValue(queryString, "x"));
+                        float y = Float.parseFloat(queryValue(queryString, "y"));
+                        sendJson(out, h == null ? "{\"ok\":false,\"error\":\"not ready\"}" : h.focusAt(x, y));
+                    } catch (Exception e) {
+                        sendJson(out, "{\"ok\":false,\"error\":\"invalid focus coordinates\"}");
+                    }
+                } else if ("GET".equalsIgnoreCase(method) && "/api/brightness".equals(path))
                     ConfigHandler h = configHandler;
                     try {
                         int brightness = Integer.parseInt(queryValue(queryString, "value"));
@@ -268,10 +278,10 @@ public class MjpegServer {
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
             "<title>Android 网络摄像头</title>" +
             "<style>body{font-family:Arial;background:#111;color:#eee;margin:0;padding:16px}" +
-            "main{max-width:960px;margin:auto}img{width:100%;display:block;background:#000}" +
+            "main{max-width:960px;margin:auto}.video{position:relative;background:#000;touch-action:manipulation}.video img{width:100%;display:block;background:#000}.focus-box{position:absolute;width:72px;height:72px;border:2px solid #ffd400;box-sizing:border-box;pointer-events:none;transform:translate(-50%,-50%);display:none;box-shadow:0 0 0 1px rgba(0,0,0,.5)}" +
             "label{display:inline-block;margin:10px 12px 10px 0}select,button{font-size:16px;padding:8px}" +
             "#msg{margin:12px 0}</style></head><body><main>" +
-            "<h2>Android 网络摄像头</h2><img src=\"/stream\">" +
+            "<h2>Android 网络摄像头</h2><div class=\"video\" id=\"video\"><img src=\"/stream\"><div class=\"focus-box\" id=\"focusBox\"></div></div>" +
             "<div id=\"msg\">正在读取状态...</div>" +
             "<label>分辨率 <select id=\"resolution\"><option>640x480</option><option>800x600</option><option>1280x720</option><option>1280x960</option><option>1920x1080</option></select></label>" +
             "<label>帧率 <select id=\"fps\"><option>5</option><option>10</option><option>15</option><option>20</option><option>24</option><option>25</option><option>30</option></select></label>" +
@@ -282,7 +292,8 @@ public class MjpegServer {
             "<button id=\"cameraBtn\" onclick=\"toggleCamera()\">关闭摄像头</button>" +
             "<p><a href=\"/setings\" style=\"display:inline-block;margin-top:12px;padding:10px 14px;background:#333;color:#fff;text-decoration:none;border-radius:6px\">打开手机设置（卸载本程序）</a></p>" +
             "</main><script>" +
-            "async function loadStatus(){try{let r=await fetch('/api/status');let j=await r.json();" +
+            "const video=document.getElementById('video');const focusBox=document.getElementById('focusBox');video.addEventListener('click',async function(e){const r=this.getBoundingClientRect();const x=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));const y=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));focusBox.style.left=(x*100)+'%';focusBox.style.top=(y*100)+'%';focusBox.style.display='block';clearTimeout(window.focusBoxTimer);window.focusBoxTimer=setTimeout(function(){focusBox.style.display='none';},1500);try{let j=await (await fetch('/api/focus?x='+x.toFixed(4)+'&y='+y.toFixed(4))).json();document.getElementById('msg').textContent=j.focusOk?'已对焦到点击位置':'对焦失败';}catch(e){document.getElementById('msg').textContent='对焦请求失败';}});" +
+            "async function loadStatus(){try{let r=await fetch('/api/status');let j=await r.json();"
             "if(j.resolution)document.getElementById('resolution').value=j.resolution;" +
             "if(j.fps)document.getElementById('fps').value=j.fps;" +
             "if(j.zoom)document.getElementById('zoom').value=j.zoom;" +
