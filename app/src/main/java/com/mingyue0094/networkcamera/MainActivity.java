@@ -399,6 +399,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             params.setJpegQuality(75);
             setFps(params, fps);
             setZoom(params, zoom);
+            setFocusMode(params);
         } catch (Exception e) {
             cameraError = "设置参数失败: " + formatException(e);
             setStatusText(network + "\n摄像头: " + cameraError);
@@ -449,6 +450,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
         try {
             camera.startPreview();
+            triggerAutoFocusIfNeeded();
         } catch (Exception e) {
             cameraError = "camera.startPreview 失败: " + formatException(e);
             setStatusText(network + "\n摄像头: " + cameraError);
@@ -462,7 +464,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             setStatusText(network + "\n摄像头: OK\n"
                     + actual.width + "x" + actual.height + "  "
                     + getFpsText(camera.getParameters()) + "  "
-                    + getZoomText(camera.getParameters()));
+                    + getZoomText(camera.getParameters()) + "  "
+                    + "Focus:" + getFocusModeText(camera.getParameters()));
         } catch (Exception e) {
             setStatusText(network + "\n摄像头: 已启动（读取实际参数失败）\n"
                     + formatException(e));
@@ -525,6 +528,57 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         String msg = e.getMessage();
         if (msg == null || msg.length() == 0) msg = e.toString();
         return e.getClass().getSimpleName() + ": " + msg;
+    }
+
+    /**
+     * 为视频预览选择实际支持的对焦模式。
+     *
+     * Camera1 不同设备支持的模式不同，不能直接写死 CONTINUOUS_VIDEO。
+     * 视频优先使用连续对焦；旧设备若不支持，则退回普通 AUTO。
+     */
+    private void setFocusMode(Camera.Parameters p) {
+        try {
+            List<String> modes = p.getSupportedFocusModes();
+            if (modes == null || modes.isEmpty()) return;
+
+            if (modes.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO)) {
+                p.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
+            } else if (modes.contains(Camera.Parameters.FOCUS_MODE_AUTO)) {
+                p.setFocusMode(Camera.Parameters.FOCUS_MODE_AUTO);
+            } else if (modes.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
+                p.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    /**
+     * 普通 AUTO 模式需要显式触发一次自动对焦。
+     * continuous-video 会在 setParameters 后自行持续对焦，不重复调用 autoFocus，
+     * 避免把连续对焦锁死。
+     */
+    private void triggerAutoFocusIfNeeded() {
+        if (camera == null) return;
+        try {
+            Camera.Parameters p = camera.getParameters();
+            String mode = p.getFocusMode();
+            if (Camera.Parameters.FOCUS_MODE_AUTO.equals(mode)
+                    || Camera.Parameters.FOCUS_MODE_MACRO.equals(mode)) {
+                camera.autoFocus(new Camera.AutoFocusCallback() {
+                    @Override public void onAutoFocus(boolean success, Camera c) {
+                        // AUTO 模式完成一次对焦即可；下次需要时再次触发。
+                    }
+                });
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private String getFocusModeText(Camera.Parameters p) {
+        try {
+            String mode = p.getFocusMode();
+            return mode == null ? "unknown" : mode;
+        } catch (Exception ignored) {
+            return "unknown";
+        }
     }
 
     private void setFps(Camera.Parameters p, int wanted) {
