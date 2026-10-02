@@ -63,6 +63,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             @Override public String setCameraEnabled(boolean enabled) {
                 return setCameraEnabledFromWeb(enabled);
             }
+            @Override public String setCameraBrightness(int compensation) {
+                return setCameraBrightnessFromWeb(compensation);
+            }
         });
         try { server.start(); status.setText("网络摄像头启动中..."); }
         catch (IOException e) { status.setText("HTTP 8080 启动失败: " + e.getMessage()); }
