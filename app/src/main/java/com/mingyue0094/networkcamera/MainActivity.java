@@ -174,7 +174,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 targetZoom = zoomList[zi];
                 // “应用”必须负责启动/重启摄像头；即使之前 camera 启动失败或尚未启动，也要重试。
                 if (holder != null && holder.getSurface() != null && holder.getSurface().isValid()) {
-                    restartCamera(widths[ri], heights[ri], targetFps, targetZoom);
+                    restartCamera(widths[ri], heights[ri], targetFps, targetZoom, prefs.getString("focus_mode", "continuous"));
                 } else {
                     status.setText("摄像头预览界面尚未就绪，请稍后再点应用");
                 }
