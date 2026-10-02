@@ -31,6 +31,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private SharedPreferences prefs;
     private int targetFps = 15;
     private float targetZoom = 1.0f;
+    private volatile boolean cameraEnabled = true;
     private BroadcastReceiver wifiReceiver;
     private String cameraError = "";
     private final Object frameLock = new Object();
@@ -45,6 +46,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         getWindow().setFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN,
                 android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN);
         prefs = getSharedPreferences("camera", MODE_PRIVATE);
+        cameraEnabled = prefs.getBoolean("camera_enabled", true);
         setContentView(createView());
         holder = surfaceView.getHolder();
         holder.addCallback(this);
@@ -52,11 +54,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         server.setAuthPassword(prefs.getString("web_password", ""));
         server.setConfigHandler(new MjpegServer.ConfigHandler() {
             @Override public String getStatusJson() { return getWebStatusJson(); }
-            @Override public String applyConfig(String resolution, int fps, float zoom) {
-                return applyWebConfig(resolution, fps, zoom);
+            @Override public String applyConfig(String resolution, int fps, float zoom, String focus) {
+                return applyWebConfig(resolution, fps, zoom, focus);
             }
             @Override public boolean openSettings() {
                 return openAppSettings();
+            }
+            @Override public String setCameraEnabled(boolean enabled) {
+                return setCameraEnabledFromWeb(enabled);
+            }
+            @Override public String setCameraBrightness(int compensation) {
+                return setCameraBrightnessFromWeb(compensation);
+            }
+            @Override public String focusAt(float x, float y) {
+                return focusAtFromWeb(x, y);
             }
         });
         try { server.start(); status.setText("网络摄像头启动中..."); }
@@ -111,6 +122,25 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         row.addView(apply);
         panel.addView(row);
 
+        LinearLayout powerRow = new LinearLayout(this);
+        final Button cameraButton = new Button(this);
+        cameraButton.setText(cameraEnabled ? "关闭摄像头" : "打开摄像头");
+        powerRow.addView(cameraButton, new LinearLayout.LayoutParams(0, -2, 1));
+        panel.addView(powerRow);
+
+        cameraButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                cameraEnabled = !cameraEnabled;
+                prefs.edit().putBoolean("camera_enabled", cameraEnabled).apply();
+                if (cameraEnabled) startCamera();
+                else {
+                    releaseCamera();
+                    setStatusText("摄像头: 已关闭（省电）");
+                }
+                cameraButton.setText(cameraEnabled ? "关闭摄像头" : "打开摄像头");
+            }
+        });
+
         LinearLayout authRow = new LinearLayout(this);
         final EditText password = new EditText(this);
         password.setHint("网页访问密码（留空关闭密码）");
@@ -151,7 +181,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 targetZoom = zoomList[zi];
                 // “应用”必须负责启动/重启摄像头；即使之前 camera 启动失败或尚未启动，也要重试。
                 if (holder != null && holder.getSurface() != null && holder.getSurface().isValid()) {
-                    restartCamera(widths[ri], heights[ri], targetFps, targetZoom);
+                    restartCamera(widths[ri], heights[ri], targetFps, targetZoom, prefs.getString("focus_mode", "continuous"));
                 } else {
                     status.setText("摄像头预览界面尚未就绪，请稍后再点应用");
                 }
@@ -211,6 +241,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         }
     }
 
+    private String setCameraEnabledFromWeb(boolean enabled) {
+        cameraEnabled = enabled;
+        prefs.edit().putBoolean("camera_enabled", enabled).apply();
+        if (enabled) {
+            if (holder != null && holder.getSurface() != null && holder.getSurface().isValid()) {
+                startCamera();
+            }
+        } else {
+            releaseCamera();
+            setStatusText("摄像头: 已关闭（省电）");
+        }
+        return getWebStatusJson();
+    }
+
     private String getWebStatusJson() {
         Camera.Parameters p = camera == null ? null : camera.getParameters();
         String resolution = "unknown";
@@ -233,25 +277,137 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             } catch (Exception ignored) {}
         }
         int battery = getBatteryPercent();
-        return "{\"ok\":true,\"resolution\":\"" + resolution + "\",\"fps\":" + fps + ",\"zoom\":" + zoom + ",\"battery\":" + battery + "}";
+        int exposure = 0;
+        int exposureMin = 0;
+        int exposureMax = 0;
+        if (p != null) {
+            try {
+                exposure = p.getExposureCompensation();
+                exposureMin = p.getMinExposureCompensation();
+                exposureMax = p.getMaxExposureCompensation();
+            } catch (Exception ignored) {}
+        }
+        String focus = prefs.getString("focus_mode", "continuous");
+        return "{\"ok\":true,\"camera\":" + cameraEnabled
+                + ",\"resolution\":\"" + resolution + "\",\"fps\":" + fps
+                + ",\"zoom\":" + zoom + ",\"focus\":\"" + focus
+                + "\",\"battery\":" + battery
+                + ",\"brightness\":" + exposure
+                + ",\"brightnessMin\":" + exposureMin
+                + ",\"brightnessMax\":" + exposureMax + "}";
     }
 
-    private String applyWebConfig(String resolution, int fps, float zoom) {
+    /** 网页点击画面后，在点击位置创建 Camera1 focus/metering area 并执行一次自动对焦。 */
+    private String focusAtFromWeb(float x, float y) {
+        try {
+            if (camera == null) return getWebStatusJsonWithFocus(false, "camera unavailable");
+            x = Math.max(0f, Math.min(1f, x));
+            y = Math.max(0f, Math.min(1f, y));
+            Camera.Parameters p = camera.getParameters();
+            List<String> modes = p.getSupportedFocusModes();
+            if (modes == null || !modes.contains(Camera.Parameters.FOCUS_MODE_AUTO)) {
+                try {
+                    camera.autoFocus(new Camera.AutoFocusCallback() {
+                        @Override public void onAutoFocus(boolean success, Camera c) {}
+                    });
+                    return getWebStatusJsonWithFocus(true, "autofocus triggered");
+                } catch (Exception e) {
+                    return getWebStatusJsonWithFocus(false, "autofocus unavailable");
+                }
+            }
+            final String oldMode = p.getFocusMode();
+            int cx = Math.round(x * 2000f - 1000f);
+            int cy = Math.round(y * 2000f - 1000f);
+            int half = 120;
+            Camera.Area area = new Camera.Area(
+                    new android.graphics.Rect(
+                            Math.max(-1000, cx - half), Math.max(-1000, cy - half),
+                            Math.min(1000, cx + half), Math.min(1000, cy + half)), 1000);
+            if (p.getMaxNumFocusAreas() > 0) {
+                java.util.ArrayList<Camera.Area> areas = new java.util.ArrayList<Camera.Area>();
+                areas.add(area);
+                p.setFocusAreas(areas);
+            }
+            if (p.getMaxNumMeteringAreas() > 0) {
+                java.util.ArrayList<Camera.Area> areas = new java.util.ArrayList<Camera.Area>();
+                areas.add(area);
+                p.setMeteringAreas(areas);
+            }
+            p.setFocusMode(Camera.Parameters.FOCUS_MODE_AUTO);
+            camera.setParameters(p);
+            camera.autoFocus(new Camera.AutoFocusCallback() {
+                @Override public void onAutoFocus(boolean success, Camera c) {
+                    if (c == null) return;
+                    try {
+                        if (Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO.equals(oldMode)) {
+                            Camera.Parameters restore = c.getParameters();
+                            List<String> supported = restore.getSupportedFocusModes();
+                            if (supported != null && supported.contains(oldMode)) {
+                                restore.setFocusMode(oldMode);
+                                c.setParameters(restore);
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+            });
+            return getWebStatusJsonWithFocus(true, "focus requested");
+        } catch (Exception e) {
+            return getWebStatusJsonWithFocus(false, "focus failed");
+        }
+    }
+
+    private String getWebStatusJsonWithFocus(boolean ok, String message) {
+        String base = getWebStatusJson();
+        if (base.endsWith("}")) base = base.substring(0, base.length() - 1);
+        return base + ",\"focusOk\":" + ok + ",\"focusMessage\":\"" + jsonEscape(message) + "\"}";
+    }
+
+    private String setCameraBrightnessFromWeb(int compensation) {
+        try {
+            if (camera == null) return getWebStatusJson();
+            Camera.Parameters p = camera.getParameters();
+            int min = p.getMinExposureCompensation();
+            int max = p.getMaxExposureCompensation();
+            if (max <= min) return getWebStatusJson();
+            if (compensation < min) compensation = min;
+            if (compensation > max) compensation = max;
+            p.setExposureCompensation(compensation);
+            camera.setParameters(p);
+            prefs.edit().putInt("brightness_compensation", compensation).apply();
+            return getWebStatusJson();
+        } catch (Exception e) {
+            return "{\"ok\":false,\"error\":\"camera brightness unavailable\"}";
+        }
+    }
+
+    private void setSavedExposure(Camera.Parameters p) {
+        try {
+            int min = p.getMinExposureCompensation();
+            int max = p.getMaxExposureCompensation();
+            if (max <= min) return;
+            int value = prefs.getInt("brightness_compensation", 0);
+            if (value < min) value = min;
+            if (value > max) value = max;
+            p.setExposureCompensation(value);
+        } catch (Exception ignored) {}
+    }
+
+    private String applyWebConfig(String resolution, int fps, float zoom, String focus) {
         try {
             String[] parts = resolution.split("x");
             if (parts.length != 2) throw new IllegalArgumentException();
             int w = Integer.parseInt(parts[0]);
             int h = Integer.parseInt(parts[1]);
             if (fps < 1 || fps > 60 || zoom < 1f || zoom > 20f) throw new IllegalArgumentException();
+            if (!"continuous".equals(focus) && !"single".equals(focus) && !"lock".equals(focus)) throw new IllegalArgumentException();
             prefs.edit().putInt("resolution", resolutionIndex(w, h))
-                    .putInt("fps", fps).putFloat("zoom", zoom).apply();
+                    .putInt("fps", fps).putFloat("zoom", zoom).putString("focus_mode", focus).apply();
             targetFps = fps;
             targetZoom = zoom;
-            if (camera == null) {
-                restartCamera(w, h, fps, zoom);
-            } else {
-                restartCamera(w, h, fps, zoom);
+            if (!cameraEnabled) {
+                return getWebStatusJson();
             }
+            restartCamera(w, h, fps, zoom, focus);
             if (camera == null) {
                 String err = cameraError.length() == 0 ? "camera restart failed" : cameraError;
                 return "{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}";
@@ -304,7 +460,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         }
     }
 
-    @Override public void surfaceCreated(SurfaceHolder h) { startCamera(); }
+    @Override public void surfaceCreated(SurfaceHolder h) { if (cameraEnabled) startCamera(); }
 
     private void startCamera() {
         int ri = prefs.getInt("resolution", 2);
@@ -312,10 +468,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         int[] heights = {480, 600, 720, 960, 1080};
         targetFps = prefs.getInt("fps", 15);
         targetZoom = prefs.getFloat("zoom", 1.0f);
-        restartCamera(widths[ri], heights[ri], targetFps, targetZoom);
+        restartCamera(widths[ri], heights[ri], targetFps, targetZoom, prefs.getString("focus_mode", "continuous"));
     }
 
-    private void restartCamera(int wantedW, int wantedH, int fps, float zoom) {
+    private void restartCamera(int wantedW, int wantedH, int fps, float zoom, String focusMode) {
         releaseCamera();
         cameraError = "";
 
@@ -361,6 +517,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             params.setJpegQuality(75);
             setFps(params, fps);
             setZoom(params, zoom);
+            setFocusMode(params, focusMode);
+            setSavedExposure(params);
         } catch (Exception e) {
             cameraError = "设置参数失败: " + formatException(e);
             setStatusText(network + "\n摄像头: " + cameraError);
@@ -411,6 +569,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
         try {
             camera.startPreview();
+            triggerAutoFocusIfNeeded(focusMode);
         } catch (Exception e) {
             cameraError = "camera.startPreview 失败: " + formatException(e);
             setStatusText(network + "\n摄像头: " + cameraError);
@@ -424,7 +583,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             setStatusText(network + "\n摄像头: OK\n"
                     + actual.width + "x" + actual.height + "  "
                     + getFpsText(camera.getParameters()) + "  "
-                    + getZoomText(camera.getParameters()));
+                    + getZoomText(camera.getParameters()) + "  Focus:" + getFocusModeText(camera.getParameters()));
         } catch (Exception e) {
             setStatusText(network + "\n摄像头: 已启动（读取实际参数失败）\n"
                     + formatException(e));
@@ -523,6 +682,50 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         } catch (Exception ignored) {}
     }
 
+    private void setFocusMode(Camera.Parameters p, String wanted) {
+        try {
+            List<String> modes = p.getSupportedFocusModes();
+            if (modes == null || modes.isEmpty()) return;
+            if ("continuous".equals(wanted) && modes.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO)) {
+                p.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
+            } else if ("single".equals(wanted) && modes.contains(Camera.Parameters.FOCUS_MODE_AUTO)) {
+                p.setFocusMode(Camera.Parameters.FOCUS_MODE_AUTO);
+            } else if ("lock".equals(wanted)) {
+                if (modes.contains(Camera.Parameters.FOCUS_MODE_FIXED)) p.setFocusMode(Camera.Parameters.FOCUS_MODE_FIXED);
+                else if (modes.contains(Camera.Parameters.FOCUS_MODE_INFINITY)) p.setFocusMode(Camera.Parameters.FOCUS_MODE_INFINITY);
+                else if (modes.contains(Camera.Parameters.FOCUS_MODE_AUTO)) p.setFocusMode(Camera.Parameters.FOCUS_MODE_AUTO);
+            } else if (modes.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO)) {
+                p.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
+            } else if (modes.contains(Camera.Parameters.FOCUS_MODE_AUTO)) {
+                p.setFocusMode(Camera.Parameters.FOCUS_MODE_AUTO);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void triggerAutoFocusIfNeeded(String wanted) {
+        if (!"single".equals(wanted) || camera == null) return;
+        try {
+            if (Camera.Parameters.FOCUS_MODE_AUTO.equals(camera.getParameters().getFocusMode())) {
+                camera.autoFocus(new Camera.AutoFocusCallback() {
+                    @Override public void onAutoFocus(boolean success, Camera c) {}
+                });
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private String getFocusModeText(Camera.Parameters p) {
+        try {
+            String mode = p.getFocusMode();
+            if (Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO.equals(mode)) return "连续自动";
+            if (Camera.Parameters.FOCUS_MODE_AUTO.equals(mode)) return "单次自动/锁定";
+            if (Camera.Parameters.FOCUS_MODE_FIXED.equals(mode) ||
+                    Camera.Parameters.FOCUS_MODE_INFINITY.equals(mode)) return "锁定";
+            return mode == null ? "未知" : mode;
+        } catch (Exception e) {
+            return "未知";
+        }
+    }
+
     private String getZoomText(Camera.Parameters p) {
         try {
             if (!p.isZoomSupported()) return "Zoom不支持";
@@ -571,6 +774,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
     private void releaseCamera() {
         stopEncoder();
+        if (server != null) server.clearFrame();
         if (camera != null) {
             try { camera.setPreviewCallback(null); } catch (Exception ignored) {}
             try { camera.stopPreview(); } catch (Exception ignored) {}

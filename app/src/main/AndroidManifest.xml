@@ -19,14 +19,24 @@
             android:name=".MainActivity"
             android:screenOrientation="landscape"
             android:configChanges="orientation|keyboardHidden"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:stateNotNeeded="true"
+            android:clearTaskOnLaunch="true">
+            <!-- 普通应用启动图标入口 -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Android 桌面/Launcher 入口 -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.HOME" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
 
         <receiver
             android:name=".BootReceiver"
