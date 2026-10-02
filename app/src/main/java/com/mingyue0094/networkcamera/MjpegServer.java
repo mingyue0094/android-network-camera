@@ -103,6 +103,14 @@ public class MjpegServer {
                 } else if ("/api/status".equals(path)) {
                     ConfigHandler h = configHandler;
                     sendJson(out, h == null ? "{\"error\":\"not ready\"}" : h.getStatusJson());
+                } else if ("GET".equalsIgnoreCase(method) && "/api/brightness".equals(path)) {
+                    ConfigHandler h = configHandler;
+                    try {
+                        int brightness = Integer.parseInt(queryValue(queryString, "value"));
+                        sendJson(out, h == null ? "{\"ok\":false,\"error\":\"not ready\"}" : h.setBrightness(brightness));
+                    } catch (Exception e) {
+                        sendJson(out, "{\"ok\":false,\"error\":\"invalid brightness\"}");
+                    }
                 } else if ("GET".equalsIgnoreCase(method) && "/api/camera".equals(path)) {
                     ConfigHandler h = configHandler;
                     boolean enabled = "1".equals(queryValue(queryString, "enabled"))
@@ -277,9 +285,11 @@ public class MjpegServer {
             "if(j.fps)document.getElementById('fps').value=j.fps;" +
             "if(j.zoom)document.getElementById('zoom').value=j.zoom;" +
             "if(j.focus)document.getElementById('focus').value=j.focus;" +
+            "if(j.brightness>0)document.getElementById('brightness').value=j.brightness;" +
             "document.getElementById('msg').textContent='当前：'+j.resolution+' / '+j.fps+' FPS / '+j.zoom+'x / 电量 '+j.battery+'%';" +
             "document.getElementById('cameraBtn').textContent=j.camera===false?'打开摄像头':'关闭摄像头';" +
             "}catch(e){document.getElementById('msg').textContent='状态读取失败';}}" +
+            "let brightnessTimer=null;function brightnessInput(){clearTimeout(brightnessTimer);brightnessTimer=setTimeout(async function(){let v=document.getElementById('brightness').value;try{let r=await fetch('/api/brightness?value='+v);let j=await r.json();document.getElementById('msg').textContent=j.ok?'屏幕亮度：'+v+'%':'亮度设置失败';}catch(e){document.getElementById('msg').textContent='亮度设置失败';}},80);}" +
             "async function toggleCamera(){let enabled=document.getElementById('cameraBtn').textContent==='打开摄像头';try{let r=await fetch('/api/camera?enabled='+(enabled?'1':'0'));let j=await r.json();document.getElementById('cameraBtn').textContent=j.camera===false?'打开摄像头':'关闭摄像头';document.getElementById('msg').textContent=j.camera===false?'摄像头已关闭（省电）':'摄像头已打开';}catch(e){document.getElementById('msg').textContent='摄像头控制失败';}}" +            "async function applyConfig(){let b={resolution:document.getElementById('resolution').value," +
             "fps:+document.getElementById('fps').value,zoom:+document.getElementById('zoom').value,focus:document.getElementById('focus').value};" +
             "document.getElementById('msg').textContent='正在应用...';try{" +
