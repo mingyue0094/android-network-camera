@@ -322,11 +322,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                     .putInt("fps", fps).putFloat("zoom", zoom).apply();
             targetFps = fps;
             targetZoom = zoom;
-            if (camera == null) {
-                restartCamera(w, h, fps, zoom);
-            } else {
-                restartCamera(w, h, fps, zoom);
+            if (!cameraEnabled) {
+                return getWebStatusJson();
             }
+            restartCamera(w, h, fps, zoom);
             if (camera == null) {
                 String err = cameraError.length() == 0 ? "camera restart failed" : cameraError;
                 return "{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}";
