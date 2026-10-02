@@ -66,6 +66,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             @Override public String setCameraBrightness(int compensation) {
                 return setCameraBrightnessFromWeb(compensation);
             }
+            @Override public String focusAt(float x, float y) {
+                return focusAtFromWeb(x, y);
+            }
         });
         try { server.start(); status.setText("网络摄像头启动中..."); }
         catch (IOException e) { status.setText("HTTP 8080 启动失败: " + e.getMessage()); }
@@ -292,6 +295,71 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 + ",\"brightness\":" + exposure
                 + ",\"brightnessMin\":" + exposureMin
                 + ",\"brightnessMax\":" + exposureMax + "}";
+    }
+
+    /** 网页点击画面后，在点击位置创建 Camera1 focus/metering area 并执行一次自动对焦。 */
+    private String focusAtFromWeb(float x, float y) {
+        try {
+            if (camera == null) return getWebStatusJsonWithFocus(false, "camera unavailable");
+            x = Math.max(0f, Math.min(1f, x));
+            y = Math.max(0f, Math.min(1f, y));
+            Camera.Parameters p = camera.getParameters();
+            List<String> modes = p.getSupportedFocusModes();
+            if (modes == null || !modes.contains(Camera.Parameters.FOCUS_MODE_AUTO)) {
+                try {
+                    camera.autoFocus(new Camera.AutoFocusCallback() {
+                        @Override public void onAutoFocus(boolean success, Camera c) {}
+                    });
+                    return getWebStatusJsonWithFocus(true, "autofocus triggered");
+                } catch (Exception e) {
+                    return getWebStatusJsonWithFocus(false, "autofocus unavailable");
+                }
+            }
+            final String oldMode = p.getFocusMode();
+            int cx = Math.round(x * 2000f - 1000f);
+            int cy = Math.round(y * 2000f - 1000f);
+            int half = 120;
+            Camera.Area area = new Camera.Area(
+                    new android.graphics.Rect(
+                            Math.max(-1000, cx - half), Math.max(-1000, cy - half),
+                            Math.min(1000, cx + half), Math.min(1000, cy + half)), 1000);
+            if (p.getMaxNumFocusAreas() > 0) {
+                java.util.ArrayList<Camera.Area> areas = new java.util.ArrayList<Camera.Area>();
+                areas.add(area);
+                p.setFocusAreas(areas);
+            }
+            if (p.getMaxNumMeteringAreas() > 0) {
+                java.util.ArrayList<Camera.Area> areas = new java.util.ArrayList<Camera.Area>();
+                areas.add(area);
+                p.setMeteringAreas(areas);
+            }
+            p.setFocusMode(Camera.Parameters.FOCUS_MODE_AUTO);
+            camera.setParameters(p);
+            camera.autoFocus(new Camera.AutoFocusCallback() {
+                @Override public void onAutoFocus(boolean success, Camera c) {
+                    if (c == null) return;
+                    try {
+                        if (Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO.equals(oldMode)) {
+                            Camera.Parameters restore = c.getParameters();
+                            List<String> supported = restore.getSupportedFocusModes();
+                            if (supported != null && supported.contains(oldMode)) {
+                                restore.setFocusMode(oldMode);
+                                c.setParameters(restore);
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+            });
+            return getWebStatusJsonWithFocus(true, "focus requested");
+        } catch (Exception e) {
+            return getWebStatusJsonWithFocus(false, "focus failed");
+        }
+    }
+
+    private String getWebStatusJsonWithFocus(boolean ok, String message) {
+        String base = getWebStatusJson();
+        if (base.endsWith("}")) base = base.substring(0, base.length() - 1);
+        return base + ",\"focusOk\":" + ok + ",\"focusMessage\":\"" + jsonEscape(message) + "\"}";
     }
 
     private String setCameraBrightnessFromWeb(int compensation) {
