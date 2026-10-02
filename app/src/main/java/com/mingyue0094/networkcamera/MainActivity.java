@@ -306,7 +306,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             } catch (Exception ignored) {}
         }
         int battery = getBatteryPercent();
-        return "{\"ok\":true,\"resolution\":\"" + resolution + "\",\"fps\":" + fps + ",\"zoom\":" + zoom + ",\"battery\":" + battery + "}";
+        return "{\"ok\":true,\"camera\":" + cameraEnabled
+                + ",\"resolution\":\"" + resolution + "\",\"fps\":" + fps
+                + ",\"zoom\":" + zoom + ",\"battery\":" + battery + "}";
     }
 
     private String applyWebConfig(String resolution, int fps, float zoom) {
