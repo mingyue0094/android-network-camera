@@ -61,6 +61,8 @@ public class MjpegServer {
         try { if (serverSocket != null) serverSocket.close(); } catch (IOException ignored) {}
     }
 
+    public void clearFrame() { latestJpeg.set(null); }
+
     public void updateFrame(byte[] jpeg) {
         if (jpeg != null && jpeg.length > 0) latestJpeg.set(jpeg);
     }
