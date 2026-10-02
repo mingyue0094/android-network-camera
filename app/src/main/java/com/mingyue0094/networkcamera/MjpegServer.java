@@ -23,6 +23,7 @@ public class MjpegServer {
         String applyConfig(String resolution, int fps, float zoom, String focus);
         boolean openSettings();
         String setCameraEnabled(boolean enabled);
+        String setBrightness(int percent);
     }
 
     public void setAuthPassword(String password) {
