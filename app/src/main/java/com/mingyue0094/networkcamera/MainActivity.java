@@ -63,9 +63,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             @Override public String setCameraEnabled(boolean enabled) {
                 return setCameraEnabledFromWeb(enabled);
             }
-            @Override public String setBrightness(int percent) {
-                return setBrightnessFromWeb(percent);
-            }
         });
         try { server.start(); status.setText("网络摄像头启动中..."); }
         catch (IOException e) { status.setText("HTTP 8080 启动失败: " + e.getMessage()); }
@@ -252,29 +249,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         return getWebStatusJson();
     }
 
-    private int getScreenBrightness() {
-        try {
-            return android.provider.Settings.System.getInt(getContentResolver(), android.provider.Settings.System.SCREEN_BRIGHTNESS);
-        } catch (Exception e) {
-            return -1;
-        }
-    }
-
-    private String setBrightnessFromWeb(int percent) {
-        if (percent < 1) percent = 1;
-        if (percent > 100) percent = 100;
-        try {
-            int value = Math.round(percent * 255f / 100f);
-            android.provider.Settings.System.putInt(getContentResolver(), android.provider.Settings.System.SCREEN_BRIGHTNESS, value);
-            android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
-            lp.screenBrightness = value / 255f;
-            getWindow().setAttributes(lp);
-            return getWebStatusJson();
-        } catch (Exception e) {
-            return "{\"ok\":false,\"error\":\"brightness unavailable\"}";
-        }
-    }
-
     private String getWebStatusJson() {
         Camera.Parameters p = camera == null ? null : camera.getParameters();
         String resolution = "unknown";
@@ -297,13 +271,54 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             } catch (Exception ignored) {}
         }
         int battery = getBatteryPercent();
-        int brightness = getScreenBrightness();
-        int brightnessPercent = brightness < 0 ? -1 : Math.max(1, Math.min(100, Math.round(brightness * 100f / 255f)));
+        int exposure = 0;
+        int exposureMin = 0;
+        int exposureMax = 0;
+        if (p != null) {
+            try {
+                exposure = p.getExposureCompensation();
+                exposureMin = p.getMinExposureCompensation();
+                exposureMax = p.getMaxExposureCompensation();
+            } catch (Exception ignored) {}
+        }
         String focus = prefs.getString("focus_mode", "continuous");
         return "{\"ok\":true,\"camera\":" + cameraEnabled
                 + ",\"resolution\":\"" + resolution + "\",\"fps\":" + fps
                 + ",\"zoom\":" + zoom + ",\"focus\":\"" + focus
-                + "\",\"battery\":" + battery + ",\"brightness\":" + brightnessPercent + "}";
+                + "\",\"battery\":" + battery
+                + ",\"brightness\":" + exposure
+                + ",\"brightnessMin\":" + exposureMin
+                + ",\"brightnessMax\":" + exposureMax + "}";
+    }
+
+    private String setCameraBrightnessFromWeb(int compensation) {
+        try {
+            if (camera == null) return getWebStatusJson();
+            Camera.Parameters p = camera.getParameters();
+            int min = p.getMinExposureCompensation();
+            int max = p.getMaxExposureCompensation();
+            if (max <= min) return getWebStatusJson();
+            if (compensation < min) compensation = min;
+            if (compensation > max) compensation = max;
+            p.setExposureCompensation(compensation);
+            camera.setParameters(p);
+            prefs.edit().putInt("brightness_compensation", compensation).apply();
+            return getWebStatusJson();
+        } catch (Exception e) {
+            return "{\"ok\":false,\"error\":\"camera brightness unavailable\"}";
+        }
+    }
+
+    private void setSavedExposure(Camera.Parameters p) {
+        try {
+            int min = p.getMinExposureCompensation();
+            int max = p.getMaxExposureCompensation();
+            if (max <= min) return;
+            int value = prefs.getInt("brightness_compensation", 0);
+            if (value < min) value = min;
+            if (value > max) value = max;
+            p.setExposureCompensation(value);
+        } catch (Exception ignored) {}
     }
 
     private String applyWebConfig(String resolution, int fps, float zoom, String focus) {
@@ -432,6 +447,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             setFps(params, fps);
             setZoom(params, zoom);
             setFocusMode(params, focusMode);
+            setSavedExposure(params);
         } catch (Exception e) {
             cameraError = "设置参数失败: " + formatException(e);
             setStatusText(network + "\n摄像头: " + cameraError);
