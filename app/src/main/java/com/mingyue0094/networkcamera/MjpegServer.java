@@ -20,7 +20,7 @@ public class MjpegServer {
 
     public interface ConfigHandler {
         String getStatusJson();
-        String applyConfig(String resolution, int fps, float zoom);
+        String applyConfig(String resolution, int fps, float zoom, String focus);
         boolean openSettings();
         String setCameraEnabled(boolean enabled);
     }
@@ -192,7 +192,8 @@ public class MjpegServer {
                 String resolution = jsonValue(body, "resolution");
                 int fps = Integer.parseInt(jsonValue(body, "fps"));
                 float zoom = Float.parseFloat(jsonValue(body, "zoom"));
-                return h.applyConfig(resolution, fps, zoom);
+                String focus = jsonValue(body, "focus");
+                return h.applyConfig(resolution, fps, zoom, focus);
             } catch (Exception e) {
                 return "{\"ok\":false,\"error\":\"invalid parameters\"}";
             }
@@ -266,6 +267,7 @@ public class MjpegServer {
             "<label>分辨率 <select id=\"resolution\"><option>640x480</option><option>800x600</option><option>1280x720</option><option>1280x960</option><option>1920x1080</option></select></label>" +
             "<label>帧率 <select id=\"fps\"><option>5</option><option>10</option><option>15</option><option>20</option><option>24</option><option>25</option><option>30</option></select></label>" +
             "<label>缩放 <select id=\"zoom\"><option>1</option><option>1.5</option><option>2</option><option>3</option><option>4</option><option>6</option><option>8</option></select></label>" +
+            "<label>对焦 <select id=\"focus\"><option value=\"continuous\">连续自动</option><option value=\"single\">单次自动</option><option value=\"lock\">锁定</option></select></label>" +
             "<button onclick=\"applyConfig()\">应用设置</button>" +
             "<button id=\"cameraBtn\" onclick=\"toggleCamera()\">关闭摄像头</button>" +
             "<p><a href=\"/setings\" style=\"display:inline-block;margin-top:12px;padding:10px 14px;background:#333;color:#fff;text-decoration:none;border-radius:6px\">打开手机设置（卸载本程序）</a></p>" +
@@ -274,11 +276,12 @@ public class MjpegServer {
             "if(j.resolution)document.getElementById('resolution').value=j.resolution;" +
             "if(j.fps)document.getElementById('fps').value=j.fps;" +
             "if(j.zoom)document.getElementById('zoom').value=j.zoom;" +
+            "if(j.focus)document.getElementById('focus').value=j.focus;" +
             "document.getElementById('msg').textContent='当前：'+j.resolution+' / '+j.fps+' FPS / '+j.zoom+'x / 电量 '+j.battery+'%';" +
             "document.getElementById('cameraBtn').textContent=j.camera===false?'打开摄像头':'关闭摄像头';" +
             "}catch(e){document.getElementById('msg').textContent='状态读取失败';}}" +
             "async function toggleCamera(){let enabled=document.getElementById('cameraBtn').textContent==='打开摄像头';try{let r=await fetch('/api/camera?enabled='+(enabled?'1':'0'));let j=await r.json();document.getElementById('cameraBtn').textContent=j.camera===false?'打开摄像头':'关闭摄像头';document.getElementById('msg').textContent=j.camera===false?'摄像头已关闭（省电）':'摄像头已打开';}catch(e){document.getElementById('msg').textContent='摄像头控制失败';}}" +            "async function applyConfig(){let b={resolution:document.getElementById('resolution').value," +
-            "fps:+document.getElementById('fps').value,zoom:+document.getElementById('zoom').value};" +
+            "fps:+document.getElementById('fps').value,zoom:+document.getElementById('zoom').value,focus:document.getElementById('focus').value};" +
             "document.getElementById('msg').textContent='正在应用...';try{" +
             "let r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});" +
             "let j=await r.json();document.getElementById('msg').textContent=j.ok?'已应用：'+j.resolution+' / '+j.fps+' FPS / '+j.zoom+'x':'失败：'+j.error;" +
