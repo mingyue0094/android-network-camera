@@ -54,8 +54,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         server.setAuthPassword(prefs.getString("web_password", ""));
         server.setConfigHandler(new MjpegServer.ConfigHandler() {
             @Override public String getStatusJson() { return getWebStatusJson(); }
-            @Override public String applyConfig(String resolution, int fps, float zoom) {
-                return applyWebConfig(resolution, fps, zoom, prefs.getString("focus_mode", "continuous"));
+            @Override public String applyConfig(String resolution, int fps, float zoom, String focus) {
+                return applyWebConfig(resolution, fps, zoom, focus);
             }
             @Override public boolean openSettings() {
                 return openAppSettings();
@@ -270,9 +270,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             } catch (Exception ignored) {}
         }
         int battery = getBatteryPercent();
+        String focus = prefs.getString("focus_mode", "continuous");
         return "{\"ok\":true,\"camera\":" + cameraEnabled
                 + ",\"resolution\":\"" + resolution + "\",\"fps\":" + fps
-                + ",\"zoom\":" + zoom + ",\"battery\":" + battery + "}";
+                + ",\"zoom\":" + zoom + ",\"focus\":\"" + jsonEscape(focus) + "\",\"battery\":" + battery + "}";
     }
 
     private String applyWebConfig(String resolution, int fps, float zoom, String focusMode) {
@@ -352,7 +353,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         int[] heights = {480, 600, 720, 960, 1080};
         targetFps = prefs.getInt("fps", 15);
         targetZoom = prefs.getFloat("zoom", 1.0f);
-        restartCamera(widths[ri], heights[ri], targetFps, targetZoom);
+        restartCamera(widths[ri], heights[ri], targetFps, targetZoom, prefs.getString("focus_mode", "continuous"));
     }
 
     private void restartCamera(int wantedW, int wantedH, int fps, float zoom, String focusMode) {
