@@ -629,7 +629,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             camera = null;
         }
     }
-}    private void setFocusMode(Camera.Parameters p, String wanted) {
+    private void setFocusMode(Camera.Parameters p, String wanted) {
         try {
             List<String> modes = p.getSupportedFocusModes();
             if (modes == null || modes.isEmpty()) return;
