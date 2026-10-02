@@ -8,8 +8,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.net.Uri;
 import android.provider.Settings;
-import android.app.admin.DevicePolicyManager;
-import android.content.ComponentName;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.hardware.Camera;
@@ -34,8 +32,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private int targetFps = 15;
     private float targetZoom = 1.0f;
     private volatile boolean cameraEnabled = true;
-    private DevicePolicyManager devicePolicyManager;
-    private ComponentName deviceAdminComponent;
     private BroadcastReceiver wifiReceiver;
     private String cameraError = "";
     private final Object frameLock = new Object();
@@ -51,8 +47,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN);
         prefs = getSharedPreferences("camera", MODE_PRIVATE);
         cameraEnabled = prefs.getBoolean("camera_enabled", true);
-        devicePolicyManager = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
-        deviceAdminComponent = new ComponentName(this, CameraDeviceAdminReceiver.class);
         setContentView(createView());
         holder = surfaceView.getHolder();
         holder.addCallback(this);
@@ -68,11 +62,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             }
             @Override public String setCameraEnabled(boolean enabled) {
                 return setCameraEnabledFromWeb(enabled);
-            }
-            @Override public boolean lockScreen() {
-                return lockScreenFromWeb();
-            }
-        });
+            }        });
         try { server.start(); status.setText("网络摄像头启动中..."); }
         catch (IOException e) { status.setText("HTTP 8080 启动失败: " + e.getMessage()); }
         registerWifiReceiver();
@@ -128,10 +118,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         LinearLayout powerRow = new LinearLayout(this);
         final Button cameraButton = new Button(this);
         cameraButton.setText(cameraEnabled ? "关闭摄像头" : "打开摄像头");
-        Button lockButton = new Button(this);
-        lockButton.setText("锁屏");
         powerRow.addView(cameraButton, new LinearLayout.LayoutParams(0, -2, 1));
-        powerRow.addView(lockButton, new LinearLayout.LayoutParams(0, -2, 1));
         panel.addView(powerRow);
 
         cameraButton.setOnClickListener(new View.OnClickListener() {
@@ -144,11 +131,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                     setStatusText("摄像头: 已关闭（省电）");
                 }
                 cameraButton.setText(cameraEnabled ? "关闭摄像头" : "打开摄像头");
-            }
-        });
-        lockButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                lockScreenFromWeb();
             }
         });
 
@@ -264,24 +246,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             setStatusText("摄像头: 已关闭（省电）");
         }
         return getWebStatusJson();
-    }
-
-    private boolean lockScreenFromWeb() {
-        try {
-            if (devicePolicyManager == null || deviceAdminComponent == null) return false;
-            if (!devicePolicyManager.isAdminActive(deviceAdminComponent)) {
-                Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
-                intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, deviceAdminComponent);
-                intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                        "允许网络摄像头通过网页按钮执行锁屏。");
-                startActivity(intent);
-                return false;
-            }
-            devicePolicyManager.lockNow();
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
     }
 
     private String getWebStatusJson() {
