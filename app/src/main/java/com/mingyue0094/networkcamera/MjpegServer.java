@@ -272,14 +272,19 @@ public class MjpegServer {
             "<label>帧率 <select id=\"fps\"><option>5</option><option>10</option><option>15</option><option>20</option><option>24</option><option>25</option><option>30</option></select></label>" +
             "<label>缩放 <select id=\"zoom\"><option>1</option><option>1.5</option><option>2</option><option>3</option><option>4</option><option>6</option><option>8</option></select></label>" +
             "<button onclick=\"applyConfig()\">应用设置</button>" +
+            "<button id=\"cameraBtn\" onclick=\"toggleCamera()\">关闭摄像头</button>" +
+            "<button onclick=\"lockScreen()\">锁屏</button>" +
             "<p><a href=\"/setings\" style=\"display:inline-block;margin-top:12px;padding:10px 14px;background:#333;color:#fff;text-decoration:none;border-radius:6px\">打开手机设置（卸载本程序）</a></p>" +
             "</main><script>" +
             "async function loadStatus(){try{let r=await fetch('/api/status');let j=await r.json();" +
             "if(j.resolution)document.getElementById('resolution').value=j.resolution;" +
             "if(j.fps)document.getElementById('fps').value=j.fps;" +
             "if(j.zoom)document.getElementById('zoom').value=j.zoom;" +
-            "document.getElementById('msg').textContent='当前：'+j.resolution+' / '+j.fps+' FPS / '+j.zoom+'x';" +
+            "document.getElementById('msg').textContent='当前：'+j.resolution+' / '+j.fps+' FPS / '+j.zoom+'x / 电量 '+j.battery+'%';" +
+            "document.getElementById('cameraBtn').textContent=j.camera===false?'打开摄像头':'关闭摄像头';" +
             "}catch(e){document.getElementById('msg').textContent='状态读取失败';}}" +
+            "async function toggleCamera(){let enabled=document.getElementById('cameraBtn').textContent==='打开摄像头';try{let r=await fetch('/api/camera?enabled='+(enabled?'1':'0'));let j=await r.json();document.getElementById('cameraBtn').textContent=j.camera===false?'打开摄像头':'关闭摄像头';document.getElementById('msg').textContent=j.camera===false?'摄像头已关闭（省电）':'摄像头已打开';}catch(e){document.getElementById('msg').textContent='摄像头控制失败';}}" +
+            "async function lockScreen(){try{let r=await fetch('/api/lock');let j=await r.json();document.getElementById('msg').textContent=j.ok?'已锁屏':'请先在手机上确认锁屏权限';}catch(e){document.getElementById('msg').textContent='锁屏请求失败';}}" +
             "async function applyConfig(){let b={resolution:document.getElementById('resolution').value," +
             "fps:+document.getElementById('fps').value,zoom:+document.getElementById('zoom').value};" +
             "document.getElementById('msg').textContent='正在应用...';try{" +
