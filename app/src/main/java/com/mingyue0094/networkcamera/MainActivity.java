@@ -1,6 +1,8 @@
 package com.mingyue0094.networkcamera;
 
 import android.app.Activity;
+import android.app.admin.DevicePolicyManager;
+import android.content.ComponentName;
 import android.content.SharedPreferences;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -43,6 +45,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private volatile boolean encoderRunning;
     private Thread encoderThread;
     private Camera.PreviewCallback cameraPreviewCallback;
+    private DevicePolicyManager devicePolicyManager;
+    private ComponentName deviceAdminComponent;
+    private boolean pendingLockScreen;
+    private static final int REQUEST_ENABLE_DEVICE_ADMIN = 9001;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -53,6 +59,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         setContentView(createView());
         holder = surfaceView.getHolder();
         holder.addCallback(this);
+        devicePolicyManager = (DevicePolicyManager) getSystemService(DEVICE_POLICY_SERVICE);
+        deviceAdminComponent = new ComponentName(this, AdminReceiver.class);
         server = new MjpegServer();
         server.setAuthPassword(prefs.getString("web_password", ""));
         server.setConfigHandler(new MjpegServer.ConfigHandler() {
@@ -71,6 +79,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             }
             @Override public String focusAt(float x, float y) {
                 return focusAtFromWeb(x, y);
+            }
+            @Override public String setWebPassword(String password) {
+                return setWebPasswordFromWeb(password);
+            }
+            @Override public String lockScreen() {
+                return lockScreenFromWeb();
             }
         });
         try { server.start(); status.setText("网络摄像头启动中..."); }
@@ -165,6 +179,48 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             return true;
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    private String setWebPasswordFromWeb(String password) {
+        if (password == null) password = "";
+        password = password.trim();
+        prefs.edit().putString("web_password", password).apply();
+        if (server != null) server.setAuthPassword(password);
+        return "{\"ok\":true,\"passwordSet\":" + (!password.isEmpty()) + "}";
+    }
+
+    private String lockScreenFromWeb() {
+        try {
+            if (devicePolicyManager == null) return "{\"ok\":false,\"error\":\"设备锁屏功能不可用\"}";
+            if (!devicePolicyManager.isAdminActive(deviceAdminComponent)) {
+                pendingLockScreen = true;
+                final Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+                intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, deviceAdminComponent);
+                intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "允许网络摄像头通过网页按钮手动锁定手机屏幕。");
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        try { startActivityForResult(intent, REQUEST_ENABLE_DEVICE_ADMIN); } catch (Exception ignored) {}
+                    }
+                });
+                return "{\"ok\":false,\"needAdmin\":true,\"error\":\"请先在手机上授权设备管理\"}";
+            }
+            devicePolicyManager.lockNow();
+            return "{\"ok\":true,\"locked\":true}";
+        } catch (SecurityException e) {
+            return "{\"ok\":false,\"error\":\"没有设备管理锁屏权限\"}";
+        } catch (Exception e) {
+            return "{\"ok\":false,\"error\":\"锁屏失败\"}";
+        }
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_ENABLE_DEVICE_ADMIN && pendingLockScreen) {
+            pendingLockScreen = false;
+            if (resultCode == RESULT_OK && devicePolicyManager != null && devicePolicyManager.isAdminActive(deviceAdminComponent)) {
+                try { devicePolicyManager.lockNow(); } catch (Exception ignored) {}
+            }
         }
     }
 
