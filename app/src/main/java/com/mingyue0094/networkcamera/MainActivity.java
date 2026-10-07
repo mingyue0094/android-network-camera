@@ -15,6 +15,7 @@ import android.net.NetworkInfo;
 import android.hardware.Camera;
 import android.os.Bundle;
 import android.os.BatteryManager;
+import android.os.PowerManager;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.graphics.SurfaceTexture;
@@ -49,6 +50,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private ComponentName deviceAdminComponent;
     private boolean pendingLockScreen;
     private static final int REQUEST_ENABLE_DEVICE_ADMIN = 9001;
+    private PowerManager.WakeLock screenLockWakeLock;
+    private volatile boolean backgroundPreviewActive;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -219,7 +222,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         if (requestCode == REQUEST_ENABLE_DEVICE_ADMIN && pendingLockScreen) {
             pendingLockScreen = false;
             if (resultCode == RESULT_OK && devicePolicyManager != null && devicePolicyManager.isAdminActive(deviceAdminComponent)) {
-                try { devicePolicyManager.lockNow(); } catch (Exception ignored) {}
+                try {
+                    if (prepareBackgroundPreview()) {
+                        acquireScreenLockWakeLock();
+                        devicePolicyManager.lockNow();
+                    }
+                } catch (Exception ignored) {}
             }
         }
     }
@@ -466,21 +474,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     @Override public void surfaceCreated(SurfaceHolder h) {
-        // 解锁/亮屏后重新把 Camera1 预览绑定到可见 Surface。
+        // 锁屏期间不要把 Camera1 从后台 SurfaceTexture 切回可见 Surface。
         if (camera != null) {
+            if (backgroundPreviewActive && !isScreenOn()) {
+                return;
+            }
             try {
                 camera.stopPreview();
                 camera.setPreviewCallbackWithBuffer(cameraPreviewCallback);
                 camera.setPreviewDisplay(h);
                 camera.startPreview();
+                backgroundPreviewActive = false;
+                releaseScreenLockWakeLock();
                 triggerAutoFocusIfNeeded(prefs.getString("focus_mode", "continuous"));
                 return;
             } catch (Exception ignored) {
-                // 绑定失败时再走完整启动流程。
                 releaseCamera();
             }
         }
-        // 首次启动时自动执行一次原“应用”按钮逻辑。
         applyCurrentSettings();
     }
 
@@ -785,19 +796,60 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
     @Override public void surfaceDestroyed(SurfaceHolder h) {
         // 锁屏会导致 SurfaceView 的 Surface 被销毁。
-        // 不释放 Camera，否则网页 MJPEG 画面会随锁屏停止。
-        // 改用后台 SurfaceTexture 接收 Camera1 预览，编码线程继续工作。
-        if (camera == null) return;
+        // 锁屏前已经切到后台 SurfaceTexture 时，这里不再重复切换。
+        if (camera == null || backgroundPreviewActive) return;
+        prepareBackgroundPreview();
+    }
+
+    private boolean prepareBackgroundPreview() {
+        if (camera == null) return false;
         try {
-            camera.stopPreview();
             if (backgroundTexture == null) {
                 backgroundTexture = new SurfaceTexture(0);
             }
+            camera.stopPreview();
+            camera.setPreviewCallbackWithBuffer(cameraPreviewCallback);
             camera.setPreviewTexture(backgroundTexture);
             camera.startPreview();
-        } catch (Exception e) {
-            // 后台纹理绑定失败时仍保持 Camera/编码线程，不主动释放摄像头。
+            backgroundPreviewActive = true;
+            return true;
+        } catch (Exception ignored) {
+            backgroundPreviewActive = false;
+            return false;
         }
+    }
+
+    private boolean isScreenOn() {
+        try {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            return pm != null && pm.isScreenOn();
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    private void acquireScreenLockWakeLock() {
+        try {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            if (pm == null) return;
+            if (screenLockWakeLock == null) {
+                screenLockWakeLock = pm.newWakeLock(
+                        PowerManager.PARTIAL_WAKE_LOCK,
+                        "NetworkCamera:LockScreenCamera");
+                screenLockWakeLock.setReferenceCounted(false);
+            }
+            if (!screenLockWakeLock.isHeld()) {
+                screenLockWakeLock.acquire();
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void releaseScreenLockWakeLock() {
+        try {
+            if (screenLockWakeLock != null && screenLockWakeLock.isHeld()) {
+                screenLockWakeLock.release();
+            }
+        } catch (Exception ignored) {}
     }
 
     @Override protected void onDestroy() {
@@ -815,6 +867,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     private void releaseCamera() {
+        releaseScreenLockWakeLock();
+        backgroundPreviewActive = false;
         stopEncoder();
         if (server != null) server.clearFrame();
         if (camera != null) {
