@@ -413,6 +413,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // 解锁/亮屏后重新把 Camera1 预览绑定到可见 Surface。
         if (camera != null) {
             try {
+                camera.stopPreview();
                 camera.setPreviewCallbackWithBuffer(cameraPreviewCallback);
                 camera.setPreviewDisplay(h);
                 camera.startPreview();
@@ -732,6 +733,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // 改用后台 SurfaceTexture 接收 Camera1 预览，编码线程继续工作。
         if (camera == null) return;
         try {
+            camera.stopPreview();
             if (backgroundTexture == null) {
                 backgroundTexture = new SurfaceTexture(0);
             }
@@ -749,6 +751,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         }
         releaseCamera();
         if (server != null) { server.stop(); server = null; }
+        if (backgroundTexture != null) {
+            try { backgroundTexture.release(); } catch (Exception ignored) {}
+            backgroundTexture = null;
+        }
         super.onDestroy();
     }
 
