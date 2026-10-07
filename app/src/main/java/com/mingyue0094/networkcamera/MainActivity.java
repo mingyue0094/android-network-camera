@@ -511,8 +511,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // HTTP 服务和摄像头是两个独立服务，先明确显示 HTTP 状态。
         String ip = NetworkUtil.getWifiIp(this);
         String network = (ip == null || "0.0.0.0".equals(ip))
-                ? "HTTP服务: 8080 OK\nWiFi未连接"
-                : "HTTP服务: 8080 OK\nhttp://" + ip + ":8080/";
+                ? "WiFi未连接"
+                : "http://" + ip + ":8080/";
         setStatusText(network + "\n摄像头: 正在启动...");
 
         try {
@@ -614,10 +614,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         try {
             Camera.Size actual = camera.getParameters().getPreviewSize();
             cameraError = "";
-            setStatusText(network + "\n摄像头: OK\n"
-                    + actual.width + "x" + actual.height + "  "
-                    + getFpsText(camera.getParameters()) + "  "
-                    + getZoomText(camera.getParameters()) + "  Focus:" + getFocusModeText(camera.getParameters()));
+            setStatusText("");
         } catch (Exception e) {
             setStatusText(network + "\n摄像头: 已启动（读取实际参数失败）\n"
                     + formatException(e));
