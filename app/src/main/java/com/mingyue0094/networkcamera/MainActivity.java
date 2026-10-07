@@ -81,113 +81,59 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         surfaceView = new SurfaceView(this);
         root.addView(surfaceView, new FrameLayout.LayoutParams(-1, -1));
 
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(20, 20, 20, 20);
-        panel.setBackgroundColor(0xaa000000);
-
         status = new TextView(this);
         status.setTextColor(0xffffffff);
         status.setTextSize(16);
-        panel.addView(status);
+        status.setPadding(15, 15, 15, 15);
+        FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(-2, -2);
+        sp.leftMargin = 15;
+        sp.topMargin = 15;
+        root.addView(status, sp);
 
-        LinearLayout row = new LinearLayout(this);
-
-        final Spinner resolution = new Spinner(this);
-        final String[] resolutions = {"640x480", "800x600", "1280x720", "1280x960", "1920x1080"};
-        ArrayAdapter<String> ra = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, resolutions);
-        ra.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        resolution.setAdapter(ra);
-        resolution.setSelection(prefs.getInt("resolution", 2));
-
-        final Spinner fps = new Spinner(this);
-        final String[] fpsValues = {"5 FPS", "10 FPS", "15 FPS", "20 FPS", "24 FPS", "25 FPS", "30 FPS"};
-        ArrayAdapter<String> fa = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, fpsValues);
-        fa.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        fps.setAdapter(fa);
-        fps.setSelection(savedFpsIndex(prefs.getInt("fps", 15)));
-
-        final Spinner zoom = new Spinner(this);
-        final String[] zoomValues = {"1x", "1.5x", "2x", "3x", "4x", "6x", "8x"};
-        ArrayAdapter<String> za = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, zoomValues);
-        za.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        zoom.setAdapter(za);
-        zoom.setSelection(savedZoomIndex(prefs.getFloat("zoom", 1.0f)));
-
-        Button apply = new Button(this);
-        apply.setText("应用");
-        row.addView(resolution);
-        row.addView(fps);
-        row.addView(zoom);
-        row.addView(apply);
-        panel.addView(row);
-
-        LinearLayout powerRow = new LinearLayout(this);
-        final Button cameraButton = new Button(this);
-        cameraButton.setText(cameraEnabled ? "关闭摄像头" : "打开摄像头");
-        powerRow.addView(cameraButton, new LinearLayout.LayoutParams(0, -2, 1));
-        panel.addView(powerRow);
-
-        cameraButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                cameraEnabled = !cameraEnabled;
-                prefs.edit().putBoolean("camera_enabled", cameraEnabled).apply();
-                if (cameraEnabled) startCamera();
-                else {
-                    releaseCamera();
-                    setStatusText("摄像头: 已关闭（省电）");
-                }
-                cameraButton.setText(cameraEnabled ? "关闭摄像头" : "打开摄像头");
-            }
-        });
-
-        LinearLayout authRow = new LinearLayout(this);
-        final EditText password = new EditText(this);
-        password.setHint("网页访问密码（留空关闭密码）");
-        password.setSingleLine(true);
-        password.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        password.setText(prefs.getString("web_password", ""));
-        Button authApply = new Button(this);
-        authApply.setText("保存密码");
-        authRow.addView(password, new LinearLayout.LayoutParams(0, -2, 1));
-        authRow.addView(authApply);
-        panel.addView(authRow);
-
-        FrameLayout.LayoutParams pp = new FrameLayout.LayoutParams(-2, -2);
-        pp.leftMargin = 15; pp.topMargin = 15;
-        root.addView(panel, pp);
-
-        authApply.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                String value = password.getText().toString();
-                prefs.edit().putString("web_password", value).apply();
-                if (server != null) server.setAuthPassword(value);
-                Toast.makeText(MainActivity.this, value.length() == 0 ? "网页密码已关闭" : "网页密码已保存，用户名：admin", Toast.LENGTH_SHORT).show();
-            }
-        });
-
-        apply.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                int ri = resolution.getSelectedItemPosition();
-                int[] widths = {640, 800, 1280, 1280, 1920};
-                int[] heights = {480, 600, 720, 960, 1080};
-                int[] fpsList = {5, 10, 15, 20, 24, 25, 30};
-                float[] zoomList = {1f, 1.5f, 2f, 3f, 4f, 6f, 8f};
-                int fi = fps.getSelectedItemPosition();
-                int zi = zoom.getSelectedItemPosition();
-                prefs.edit().putInt("resolution", ri).putInt("fps", fpsList[fi])
-                        .putFloat("zoom", zoomList[zi]).apply();
-                targetFps = fpsList[fi];
-                targetZoom = zoomList[zi];
-                // “应用”必须负责启动/重启摄像头；即使之前 camera 启动失败或尚未启动，也要重试。
-                if (holder != null && holder.getSurface() != null && holder.getSurface().isValid()) {
-                    restartCamera(widths[ri], heights[ri], targetFps, targetZoom, prefs.getString("focus_mode", "continuous"));
-                } else {
-                    status.setText("摄像头预览界面尚未就绪，请稍后再点应用");
-                }
-            }
-        });
+        // 启动页面不再显示原来的参数选择、摄像头按钮、密码按钮和“应用”按钮。
+        // 这些功能仍然保留在代码和网页控制端。
         return root;
+    }
+
+    /**
+     * 执行原来“应用”按钮的完整逻辑。
+     * 启动时由 surfaceCreated 自动调用，相当于自动点击一次“应用”。
+     */
+    private void applyCurrentSettings() {
+        int ri = prefs.getInt("resolution", 2);
+        if (ri < 0 || ri > 4) ri = 2;
+
+        int[] widths = {640, 800, 1280, 1280, 1920};
+        int[] heights = {480, 600, 720, 960, 1080};
+
+        int[] fpsList = {5, 10, 15, 20, 24, 25, 30};
+        int savedFps = prefs.getInt("fps", 15);
+        int fps = savedFps;
+        boolean validFps = false;
+        for (int value : fpsList) {
+            if (value == savedFps) {
+                validFps = true;
+                break;
+            }
+        }
+        if (!validFps) fps = 15;
+
+        float zoom = prefs.getFloat("zoom", 1.0f);
+        if (zoom < 1.0f) zoom = 1.0f;
+
+        targetFps = fps;
+        targetZoom = zoom;
+
+        if (cameraEnabled && holder != null
+                && holder.getSurface() != null
+                && holder.getSurface().isValid()) {
+            restartCamera(widths[ri], heights[ri], targetFps, targetZoom,
+                    prefs.getString("focus_mode", "continuous"));
+        } else if (!cameraEnabled) {
+            setStatusText("摄像头: 已关闭（省电）");
+        } else {
+            setStatusText("摄像头预览界面尚未就绪");
+        }
     }
 
     /**
@@ -460,7 +406,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         }
     }
 
-    @Override public void surfaceCreated(SurfaceHolder h) { if (cameraEnabled) startCamera(); }
+    @Override public void surfaceCreated(SurfaceHolder h) {
+        // Surface 就绪后自动执行一次原“应用”按钮逻辑。
+        applyCurrentSettings();
+    }
 
     private void startCamera() {
         int ri = prefs.getInt("resolution", 2);
