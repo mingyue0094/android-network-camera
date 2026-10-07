@@ -15,6 +15,7 @@ import android.os.Bundle;
 import android.os.BatteryManager;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.graphics.SurfaceTexture;
 import android.view.View;
 import android.widget.*;
 import android.graphics.ImageFormat;
@@ -26,6 +27,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private SurfaceView surfaceView;
     private TextView status;
     private SurfaceHolder holder;
+    private SurfaceTexture backgroundTexture;
     private Camera camera;
     private MjpegServer server;
     private SharedPreferences prefs;
@@ -40,6 +42,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private int latestFrameHeight;
     private volatile boolean encoderRunning;
     private Thread encoderThread;
+    private Camera.PreviewCallback cameraPreviewCallback;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -407,7 +410,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     @Override public void surfaceCreated(SurfaceHolder h) {
-        // Surface 就绪后自动执行一次原“应用”按钮逻辑。
+        // 解锁/亮屏后重新把 Camera1 预览绑定到可见 Surface。
+        if (camera != null) {
+            try {
+                camera.setPreviewCallbackWithBuffer(cameraPreviewCallback);
+                camera.setPreviewDisplay(h);
+                camera.startPreview();
+                triggerAutoFocusIfNeeded(prefs.getString("focus_mode", "continuous"));
+                return;
+            } catch (Exception ignored) {
+                // 绑定失败时再走完整启动流程。
+                releaseCamera();
+            }
+        }
+        // 首次启动时自动执行一次原“应用”按钮逻辑。
         applyCurrentSettings();
     }
 
@@ -497,7 +513,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // JPEG 编码放到独立线程，避免阻塞 Camera 回调导致预览卡顿。
         final Camera.Size encodeSize = camera.getParameters().getPreviewSize();
         startEncoder(encodeSize.width, encodeSize.height);
-        camera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
+        cameraPreviewCallback = new Camera.PreviewCallback() {
             @Override public void onPreviewFrame(byte[] data, Camera c) {
                 if (data == null) return;
                 synchronized (frameLock) {
@@ -508,7 +524,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 }
                 try { c.addCallbackBuffer(data); } catch (Exception ignored) {}
             }
-        });
+        };
+        camera.setPreviewCallbackWithBuffer(cameraPreviewCallback);
         int bufferSize = encodeSize.width * encodeSize.height * 3 / 2;
         try {
             camera.addCallbackBuffer(new byte[bufferSize]);
@@ -709,7 +726,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // Preview configuration is handled when the surface is created.
     }
 
-    @Override public void surfaceDestroyed(SurfaceHolder h) { releaseCamera(); }
+    @Override public void surfaceDestroyed(SurfaceHolder h) {
+        // 锁屏会导致 SurfaceView 的 Surface 被销毁。
+        // 不释放 Camera，否则网页 MJPEG 画面会随锁屏停止。
+        // 改用后台 SurfaceTexture 接收 Camera1 预览，编码线程继续工作。
+        if (camera == null) return;
+        try {
+            if (backgroundTexture == null) {
+                backgroundTexture = new SurfaceTexture(0);
+            }
+            camera.setPreviewTexture(backgroundTexture);
+            camera.startPreview();
+        } catch (Exception e) {
+            // 后台纹理绑定失败时仍保持 Camera/编码线程，不主动释放摄像头。
+        }
+    }
 
     @Override protected void onDestroy() {
         if (wifiReceiver != null) {
@@ -729,6 +760,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             try { camera.stopPreview(); } catch (Exception ignored) {}
             try { camera.release(); } catch (Exception ignored) {}
             camera = null;
+            cameraPreviewCallback = null;
         }
     }
 }
